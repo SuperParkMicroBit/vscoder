@@ -57,10 +57,17 @@ public class SimpleWindow extends JFrame {
             while (it.hasNext()) {
                 Note n = it.next();
                 n.update();
-                if (n.isOutOfBounds(getWidth(), getHeight())) {
+                // if note passed center without being hit -> miss and remove
+                final int passLimit = 30; // pixels beyond center considered miss
+                if (n.hasPassedCenter(getWidth(), getHeight(), passLimit)) {
                     it.remove();
                     combo = 0; // reset combo on miss
                     feedback = "Miss";
+                    continue;
+                }
+                // also remove if completely out of screen bounds
+                if (n.isOutOfBounds(getWidth(), getHeight())) {
+                    it.remove();
                 }
             }
 
@@ -190,7 +197,8 @@ public class SimpleWindow extends JFrame {
         enum Direction {LEFT, RIGHT, UP, DOWN}
 
         static final int NOTE_LENGTH = 240; // long dimension
-        static final int THICKNESS = 36; // short dimension (thickness)
+        // THICKNESS no longer used for visual short dimension; short dimension is center square size
+        static final int THICKNESS = 36; // kept for movement spawn offsets
 
         final Direction dir;
         double x, y; // leading edge position
@@ -233,6 +241,22 @@ public class SimpleWindow extends JFrame {
             return x < -length*2 || x > panelW + length*2 || y < -length*2 || y > panelH + length*2;
         }
 
+        public boolean hasPassedCenter(int panelW, int panelH, int passLimit) {
+            int size = Math.min(panelW, panelH) / 4;
+            int cx = (panelW - size) / 2;
+            int cy = (panelH - size) / 2;
+            double d = distanceToCenterEdge(panelW, panelH);
+            switch (dir) {
+                case LEFT:
+                case UP:
+                    return d > passLimit; // moved past forward beyond threshold
+                case RIGHT:
+                case DOWN:
+                    return d < -passLimit; // moved past backward beyond threshold
+            }
+            return false;
+        }
+
         public double distanceToCenterEdge(int panelW, int panelH) {
             int size = Math.min(panelW, panelH) / 4;
             int cx = (panelW - size) / 2;
@@ -253,10 +277,11 @@ public class SimpleWindow extends JFrame {
 
             switch (dir) {
                 case LEFT:
-                    aw = THICKNESS; ah = length; ax = (int)Math.round(x - aw); ay = (int)Math.round(y - ah/2.0);
+                    // vertical long bar moving right; short dimension equals center square width
+                    aw = size; ah = length; ax = (int)Math.round(x - aw); ay = (int)Math.round(y - ah/2.0);
                     // trail
-                    drawTrail(g2, base, ax + aw/2, ay + ah/2);
-                    // glow layers
+                    drawTrail(g2, base);
+                    // glow layers (width = center width)
                     for (int i = 5; i >= 1; i--) {
                         g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 20 * i));
                         g2.fillRoundRect(ax-6-i*2, ay-6-i*4, aw+12+i*4, ah+12+i*8, 16, 16);
@@ -267,13 +292,10 @@ public class SimpleWindow extends JFrame {
                     g2.fillRoundRect(ax, ay, aw, ah, 12, 12);
                     g2.setColor(new Color(30,30,30,160));
                     g2.drawRoundRect(ax, ay, aw, ah, 12, 12);
-                    // front highlight circle
-                    g2.setColor(new Color(255,255,255,140));
-                    g2.fillOval((int)Math.round(x)-10, (int)Math.round(y)-10, 20, 20);
                     break;
                 case RIGHT:
-                    aw = THICKNESS; ah = length; ax = (int)Math.round(x); ay = (int)Math.round(y - ah/2.0);
-                    drawTrail(g2, base, ax + aw/2, ay + ah/2);
+                    aw = size; ah = length; ax = (int)Math.round(x); ay = (int)Math.round(y - ah/2.0);
+                    drawTrail(g2, base);
                     for (int i = 5; i >= 1; i--) {
                         g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 20 * i));
                         g2.fillRoundRect(ax-6-i*2, ay-6-i*4, aw+12+i*4, ah+12+i*8, 16, 16);
@@ -283,12 +305,10 @@ public class SimpleWindow extends JFrame {
                     g2.fillRoundRect(ax, ay, aw, ah, 12, 12);
                     g2.setColor(new Color(30,30,30,160));
                     g2.drawRoundRect(ax, ay, aw, ah, 12, 12);
-                    g2.setColor(new Color(255,255,255,140));
-                    g2.fillOval((int)Math.round(x)+10, (int)Math.round(y)-10, 20, 20);
                     break;
                 case UP:
-                    aw = length; ah = THICKNESS; ay = (int)Math.round(y - ah); ax = (int)Math.round(x - aw/2.0);
-                    drawTrail(g2, base, ax + aw/2, ay + ah/2);
+                    aw = length; ah = size; ay = (int)Math.round(y - ah); ax = (int)Math.round(x - aw/2.0);
+                    drawTrail(g2, base);
                     for (int i = 5; i >= 1; i--) {
                         g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 18 * i));
                         g2.fillRoundRect(ax-6-i*4, ay-6-i*2, aw+12+i*8, ah+12+i*4, 16, 16);
@@ -298,12 +318,10 @@ public class SimpleWindow extends JFrame {
                     g2.fillRoundRect(ax, ay, aw, ah, 12, 12);
                     g2.setColor(new Color(30,30,30,160));
                     g2.drawRoundRect(ax, ay, aw, ah, 12, 12);
-                    g2.setColor(new Color(255,255,255,140));
-                    g2.fillOval((int)Math.round(x)-10, (int)Math.round(y)-10, 20, 20);
                     break;
                 default: // DOWN
-                    aw = length; ah = THICKNESS; ay = (int)Math.round(y); ax = (int)Math.round(x - aw/2.0);
-                    drawTrail(g2, base, ax + aw/2, ay + ah/2);
+                    aw = length; ah = size; ay = (int)Math.round(y); ax = (int)Math.round(x - aw/2.0);
+                    drawTrail(g2, base);
                     for (int i = 5; i >= 1; i--) {
                         g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 18 * i));
                         g2.fillRoundRect(ax-6-i*4, ay-6-i*2, aw+12+i*8, ah+12+i*4, 16, 16);
@@ -313,13 +331,11 @@ public class SimpleWindow extends JFrame {
                     g2.fillRoundRect(ax, ay, aw, ah, 12, 12);
                     g2.setColor(new Color(30,30,30,160));
                     g2.drawRoundRect(ax, ay, aw, ah, 12, 12);
-                    g2.setColor(new Color(255,255,255,140));
-                    g2.fillOval((int)Math.round(x)-10, (int)Math.round(y)+10, 20, 20);
                     break;
             }
         }
 
-        private void drawTrail(Graphics2D g2, Color base, int centerX, int centerY) {
+        private void drawTrail(Graphics2D g2, Color base) {
             int alpha = 90;
             for (int i = 0; i < trail.size(); i++) {
                 Point p = trail.get(i);
