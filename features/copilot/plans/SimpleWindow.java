@@ -9,14 +9,13 @@ import java.util.Random;
 
 public class SimpleWindow extends JFrame {
     public SimpleWindow() {
-        super("Simple Window - 音游 背景渐变");
+        super("Simple Window - 音游 Phigros 风格");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(800, 800);
+        setSize(900, 900);
         setLocationRelativeTo(null);
 
         GamePanel panel = new GamePanel();
         add(panel);
-        // Focus to receive key events
         panel.setFocusable(true);
         panel.requestFocusInWindow();
     }
@@ -28,52 +27,47 @@ public class SimpleWindow extends JFrame {
         private int tick = 0;
         private int score = 0;
         private String feedback = "";
+        private int combo = 0;
+        private float comboPulse = 0f; // used for simple pulse animation on combo
+        private int hitFlash = 0; // frames to flash center on hit
 
         public GamePanel() {
-            // spawn/move at ~60fps
             timer = new Timer(16, (ActionEvent e) -> gameLoop());
             timer.start();
 
-            // Key bindings for arrow keys
+            // Key bindings
             getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0), "hitLeft");
-            getActionMap().put("hitLeft", new AbstractAction() {
-                @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.LEFT); }
-            });
+            getActionMap().put("hitLeft", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.LEFT); }});
             getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, 0), "hitRight");
-            getActionMap().put("hitRight", new AbstractAction() {
-                @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.RIGHT); }
-            });
+            getActionMap().put("hitRight", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.RIGHT); }});
             getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_UP, 0), "hitUp");
-            getActionMap().put("hitUp", new AbstractAction() {
-                @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.UP); }
-            });
+            getActionMap().put("hitUp", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.UP); }});
             getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_DOWN, 0), "hitDown");
-            getActionMap().put("hitDown", new AbstractAction() {
-                @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.DOWN); }
-            });
+            getActionMap().put("hitDown", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.DOWN); }});
 
-            // spawn some initial notes
-            for (int i = 0; i < 3; i++) spawnRandomNote();
+            // spawn initial notes
+            for (int i = 0; i < 4; i++) spawnRandomNote();
         }
 
         private void gameLoop() {
             tick++;
-            // spawn a new note every ~60 frames (about 1 second)
-            if (tick % 60 == 0) spawnRandomNote();
+            if (tick % 50 == 0) spawnRandomNote(); // every ~0.8s
 
-            // update notes
             Iterator<Note> it = notes.iterator();
             while (it.hasNext()) {
                 Note n = it.next();
                 n.update();
-                // remove notes that passed the center by some margin
                 if (n.isOutOfBounds(getWidth(), getHeight())) {
                     it.remove();
+                    combo = 0; // reset combo on miss
                     feedback = "Miss";
                 }
             }
 
-            // fade feedback
+            // combo pulse decay
+            if (comboPulse > 0f) comboPulse *= 0.92f;
+            if (hitFlash > 0) hitFlash--;
+
             if (!feedback.isEmpty() && tick % 30 == 0) feedback = "";
 
             repaint();
@@ -81,17 +75,13 @@ public class SimpleWindow extends JFrame {
 
         private void spawnRandomNote() {
             Note.Direction dir = Note.Direction.values()[rand.nextInt(4)];
-            // fixed length for all notes
             int length = Note.NOTE_LENGTH;
-            // speed: pixels per tick (higher moves faster)
-            double speed = 4 + rand.nextDouble() * 3; // 4-7 px per tick
+            double speed = 3.5 + rand.nextDouble() * 3.5; // 3.5 - 7
             notes.add(new Note(dir, length, speed, getWidth(), getHeight()));
         }
 
         private void tryHit(Note.Direction dir) {
-            // hit window tolerance in pixels: how close leading edge should be to center border
-            final int tolerance = 20;
-            // find the closest note of that direction whose leading edge is within tolerance
+            final int tolerance = 24;
             Note best = null;
             double bestDist = Double.MAX_VALUE;
             for (Note n : notes) {
@@ -103,13 +93,15 @@ public class SimpleWindow extends JFrame {
                 }
             }
             if (best != null) {
-                // successful hit
                 score += 100;
-                feedback = "Hit +100";
+                combo++;
+                feedback = "Hit";
+                comboPulse = 1.2f; // trigger pulse
+                hitFlash = 6;
                 notes.remove(best);
             } else {
-                // bad hit (no note)
-                score = Math.max(0, score - 50);
+                score = Math.max(0, score - 30);
+                combo = 0;
                 feedback = "Bad";
             }
         }
@@ -121,37 +113,42 @@ public class SimpleWindow extends JFrame {
             try {
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-                // Purple gradient background (dark -> light)
-                Color darkPurple = new Color(75, 0, 130);
-                Color lightPurple = new Color(180, 100, 255);
+                // purple gradient background
+                Color darkPurple = new Color(45, 0, 90);
+                Color lightPurple = new Color(170, 80, 255);
                 GradientPaint gp = new GradientPaint(0, 0, darkPurple, getWidth(), getHeight(), lightPurple);
                 g2.setPaint(gp);
                 g2.fillRect(0, 0, getWidth(), getHeight());
 
-                // center square: 1/4 of smaller dimension
+                // center square
                 int size = Math.min(getWidth(), getHeight()) / 4;
                 int cx = (getWidth() - size) / 2;
                 int cy = (getHeight() - size) / 2;
 
-                // draw center square border (hit areas are its four edges)
-                g2.setColor(new Color(50, 50, 50, 200));
-                g2.fillRect(cx - 6, cy - 6, size + 12, size + 12); // subtle frame behind
+                // draw center frame (slightly glowing when hit)
+                if (hitFlash > 0) {
+                    g2.setColor(new Color(255, 255, 255, 100));
+                    g2.fillRoundRect(cx - 12, cy - 12, size + 24, size + 24, 16, 16);
+                } else {
+                    g2.setColor(new Color(30, 30, 30, 160));
+                    g2.fillRoundRect(cx - 8, cy - 8, size + 16, size + 16, 12, 12);
+                }
 
-                g2.setColor(new Color(0, 170, 255));
-                g2.fillRect(cx, cy, size, size);
-
+                g2.setColor(new Color(20, 160, 240));
+                g2.fillRoundRect(cx, cy, size, size, 12, 12);
                 g2.setStroke(new BasicStroke(4f));
                 g2.setColor(Color.BLACK);
-                g2.drawRect(cx, cy, size, size);
+                g2.drawRoundRect(cx, cy, size, size, 12, 12);
 
-                // draw notes
-                for (Note n : notes) n.draw(g2, getWidth(), getHeight(), cx, cy, size);
+                // draw notes (phigros style)
+                for (Note n : notes) n.drawPhigros(g2, getWidth(), getHeight(), cx, cy, size);
 
-                // draw UI: score and feedback
+                // draw UI: score
                 g2.setColor(Color.WHITE);
                 g2.setFont(new Font("SansSerif", Font.BOLD, 20));
                 g2.drawString("Score: " + score, 16, 28);
 
+                // feedback
                 if (!feedback.isEmpty()) {
                     g2.setFont(new Font("SansSerif", Font.BOLD, 28));
                     FontMetrics fm = g2.getFontMetrics();
@@ -159,10 +156,24 @@ public class SimpleWindow extends JFrame {
                     g2.drawString(feedback, getWidth()/2 - fw/2, 40);
                 }
 
+                // combo display near center, large when >0
+                if (combo > 0) {
+                    String cText = String.valueOf(combo);
+                    float scale = 1.0f + comboPulse * 0.8f;
+                    int baseSize = 36;
+                    int fontSize = Math.round(baseSize * scale);
+                    g2.setFont(new Font("SansSerif", Font.BOLD, fontSize));
+                    FontMetrics fm = g2.getFontMetrics();
+                    int tw = fm.stringWidth(cText);
+                    g2.setColor(new Color(255, 230, 180));
+                    g2.drawString(cText, getWidth()/2 - tw/2, cy - 12);
+                }
+
                 // draw direction hints
-                g2.setFont(new Font("SansSerif", Font.PLAIN, 24));
+                g2.setFont(new Font("SansSerif", Font.PLAIN, 22));
                 FontMetrics hintFm = g2.getFontMetrics();
                 int hintW = hintFm.stringWidth("←");
+                g2.setColor(new Color(255,255,255,120));
                 g2.drawString("←", 10, getHeight()/2 + hintFm.getAscent()/2 - 4);
                 g2.drawString("→", getWidth()-10-hintW, getHeight()/2 + hintFm.getAscent()/2 - 4);
                 int upW = hintFm.stringWidth("↑");
@@ -178,142 +189,144 @@ public class SimpleWindow extends JFrame {
     private static class Note {
         enum Direction {LEFT, RIGHT, UP, DOWN}
 
-        // fixed note length (long dimension) and thickness (short dimension)
-        static final int NOTE_LENGTH = 200;
-        static final int THICKNESS = 30;
+        static final int NOTE_LENGTH = 240; // long dimension
+        static final int THICKNESS = 36; // short dimension (thickness)
 
         final Direction dir;
-        double x, y; // leading edge position along travel axis (for LEFT/RIGHT: x is leading; for UP/DOWN: y is leading)
-        final int length; // long dimension in pixels (NOTE_LENGTH)
-        final double speed; // movement per tick (pixels)
+        double x, y; // leading edge position
+        final int length;
+        final double speed;
+        // trail positions for simple tail effect
+        final List<Point> trail = new ArrayList<>();
 
         public Note(Direction dir, int length, double speed, int panelW, int panelH) {
             this.dir = dir;
             this.length = length;
             this.speed = speed;
-            // initialize position so note starts just outside the panel
             switch (dir) {
                 case LEFT:
-                    // come from left moving right: leading edge x = -THICKNESS (right edge is leading)
-                    x = -THICKNESS;
-                    y = panelH / 2.0; // center vertically
-                    break;
+                    x = -THICKNESS; y = panelH / 2.0; break;
                 case RIGHT:
-                    // come from right moving left: leading edge x = panelW + THICKNESS (left edge is leading)
-                    x = panelW + THICKNESS;
-                    y = panelH / 2.0;
-                    break;
+                    x = panelW + THICKNESS; y = panelH / 2.0; break;
                 case UP:
-                    // come from top moving down: leading edge y = -THICKNESS (bottom edge is leading)
-                    y = -THICKNESS;
-                    x = panelW / 2.0;
-                    break;
-                default: // DOWN
-                    // come from bottom moving up: leading edge y = panelH + THICKNESS (top edge is leading)
-                    y = panelH + THICKNESS;
-                    x = panelW / 2.0;
-                    break;
+                    y = -THICKNESS; x = panelW / 2.0; break;
+                default:
+                    y = panelH + THICKNESS; x = panelW / 2.0; break;
             }
+            // init trail
+            trail.add(new Point((int)x, (int)y));
         }
 
         public void update() {
             switch (dir) {
-                case LEFT: x += speed; break; // moving right
-                case RIGHT: x -= speed; break; // moving left
-                case UP: y += speed; break; // moving down
-                case DOWN: y -= speed; break; // moving up
+                case LEFT: x += speed; break;
+                case RIGHT: x -= speed; break;
+                case UP: y += speed; break;
+                case DOWN: y -= speed; break;
             }
+            // add to trail and cap length
+            trail.add(0, new Point((int)Math.round(x), (int)Math.round(y)));
+            if (trail.size() > 12) trail.remove(trail.size()-1);
         }
 
         public boolean isOutOfBounds(int panelW, int panelH) {
-            // if passed beyond panel by margin
-            return x < -length*2 && x < -THICKNESS*2 || x > panelW + length*2 || y < -length*2 || y > panelH + length*2;
+            return x < -length*2 || x > panelW + length*2 || y < -length*2 || y > panelH + length*2;
         }
 
-        // distance from leading edge to the center square edge along travel axis
         public double distanceToCenterEdge(int panelW, int panelH) {
             int size = Math.min(panelW, panelH) / 4;
             int cx = (panelW - size) / 2;
             int cy = (panelH - size) / 2;
             switch (dir) {
-                case LEFT:
-                    // leading x should match left edge (cx)
-                    return x - cx;
-                case RIGHT:
-                    // leading x should match right edge (cx+size)
-                    return x - (cx + size);
-                case UP:
-                    return y - cy;
-                case DOWN:
-                    return y - (cy + size);
+                case LEFT: return x - cx;
+                case RIGHT: return x - (cx + size);
+                case UP: return y - cy;
+                default: return y - (cy + size);
             }
-            return Double.MAX_VALUE;
         }
 
-        public void draw(Graphics2D g2, int panelW, int panelH, int cx, int cy, int size) {
-            g2.setColor(new Color(255, 220, 80));
+        public void drawPhigros(Graphics2D g2, int panelW, int panelH, int cx, int cy, int size) {
+            // glow: draw expanding translucent layers
             int ax, ay, aw, ah;
+            Color base = new Color(255, 140, 60); // warm base
+            Color accent = new Color(255, 220, 120);
+
             switch (dir) {
                 case LEFT:
-                    // vertical bar (tall) moving right: thickness horizontally, length vertically, right edge at x
-                    aw = THICKNESS;
-                    ah = length;
-                    ax = (int) Math.round(x - aw); // left x = leading right edge - thickness
-                    ay = (int) Math.round(y - ah / 2.0);
-                    g2.fillRoundRect(ax, ay, aw, ah, 8, 8);
-                    g2.setColor(Color.BLACK);
-                    g2.drawRoundRect(ax, ay, aw, ah, 8, 8);
+                    aw = THICKNESS; ah = length; ax = (int)Math.round(x - aw); ay = (int)Math.round(y - ah/2.0);
+                    // trail
+                    drawTrail(g2, base, ax + aw/2, ay + ah/2);
+                    // glow layers
+                    for (int i = 5; i >= 1; i--) {
+                        g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 20 * i));
+                        g2.fillRoundRect(ax-6-i*2, ay-6-i*4, aw+12+i*4, ah+12+i*8, 16, 16);
+                    }
+                    // body gradient
+                    GradientPaint gp = new GradientPaint(ax, ay, accent, ax, ay+ah, base);
+                    g2.setPaint(gp);
+                    g2.fillRoundRect(ax, ay, aw, ah, 12, 12);
+                    g2.setColor(new Color(30,30,30,160));
+                    g2.drawRoundRect(ax, ay, aw, ah, 12, 12);
+                    // front highlight circle
+                    g2.setColor(new Color(255,255,255,140));
+                    g2.fillOval((int)Math.round(x)-10, (int)Math.round(y)-10, 20, 20);
                     break;
                 case RIGHT:
-                    // vertical bar moving left: left edge at x
-                    aw = THICKNESS;
-                    ah = length;
-                    ax = (int) Math.round(x);
-                    ay = (int) Math.round(y - ah / 2.0);
-                    g2.fillRoundRect(ax, ay, aw, ah, 8, 8);
-                    g2.setColor(Color.BLACK);
-                    g2.drawRoundRect(ax, ay, aw, ah, 8, 8);
+                    aw = THICKNESS; ah = length; ax = (int)Math.round(x); ay = (int)Math.round(y - ah/2.0);
+                    drawTrail(g2, base, ax + aw/2, ay + ah/2);
+                    for (int i = 5; i >= 1; i--) {
+                        g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 20 * i));
+                        g2.fillRoundRect(ax-6-i*2, ay-6-i*4, aw+12+i*4, ah+12+i*8, 16, 16);
+                    }
+                    gp = new GradientPaint(ax, ay, base, ax, ay+ah, accent);
+                    g2.setPaint(gp);
+                    g2.fillRoundRect(ax, ay, aw, ah, 12, 12);
+                    g2.setColor(new Color(30,30,30,160));
+                    g2.drawRoundRect(ax, ay, aw, ah, 12, 12);
+                    g2.setColor(new Color(255,255,255,140));
+                    g2.fillOval((int)Math.round(x)+10, (int)Math.round(y)-10, 20, 20);
                     break;
                 case UP:
-                    // horizontal bar moving down: bottom edge at y
-                    aw = length;
-                    ah = THICKNESS;
-                    ay = (int) Math.round(y - ah);
-                    ax = (int) Math.round(x - aw / 2.0);
-                    g2.fillRoundRect(ax, ay, aw, ah, 8, 8);
-                    g2.setColor(Color.BLACK);
-                    g2.drawRoundRect(ax, ay, aw, ah, 8, 8);
+                    aw = length; ah = THICKNESS; ay = (int)Math.round(y - ah); ax = (int)Math.round(x - aw/2.0);
+                    drawTrail(g2, base, ax + aw/2, ay + ah/2);
+                    for (int i = 5; i >= 1; i--) {
+                        g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 18 * i));
+                        g2.fillRoundRect(ax-6-i*4, ay-6-i*2, aw+12+i*8, ah+12+i*4, 16, 16);
+                    }
+                    gp = new GradientPaint(ax, ay, accent, ax+aw, ay, base);
+                    g2.setPaint(gp);
+                    g2.fillRoundRect(ax, ay, aw, ah, 12, 12);
+                    g2.setColor(new Color(30,30,30,160));
+                    g2.drawRoundRect(ax, ay, aw, ah, 12, 12);
+                    g2.setColor(new Color(255,255,255,140));
+                    g2.fillOval((int)Math.round(x)-10, (int)Math.round(y)-10, 20, 20);
                     break;
-                case DOWN:
-                    // horizontal bar moving up: top edge at y
-                    aw = length;
-                    ah = THICKNESS;
-                    ay = (int) Math.round(y);
-                    ax = (int) Math.round(x - aw / 2.0);
-                    g2.fillRoundRect(ax, ay, aw, ah, 8, 8);
-                    g2.setColor(Color.BLACK);
-                    g2.drawRoundRect(ax, ay, aw, ah, 8, 8);
+                default: // DOWN
+                    aw = length; ah = THICKNESS; ay = (int)Math.round(y); ax = (int)Math.round(x - aw/2.0);
+                    drawTrail(g2, base, ax + aw/2, ay + ah/2);
+                    for (int i = 5; i >= 1; i--) {
+                        g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 18 * i));
+                        g2.fillRoundRect(ax-6-i*4, ay-6-i*2, aw+12+i*8, ah+12+i*4, 16, 16);
+                    }
+                    gp = new GradientPaint(ax, ay, base, ax+aw, ay);
+                    g2.setPaint(gp);
+                    g2.fillRoundRect(ax, ay, aw, ah, 12, 12);
+                    g2.setColor(new Color(30,30,30,160));
+                    g2.drawRoundRect(ax, ay, aw, ah, 12, 12);
+                    g2.setColor(new Color(255,255,255,140));
+                    g2.fillOval((int)Math.round(x)-10, (int)Math.round(y)+10, 20, 20);
                     break;
             }
+        }
 
-            // Optionally draw a small marker when the leading edge is close to the hit edge
-            double dist = distanceToCenterEdge(panelW, panelH);
-            if (Math.abs(dist) < 40) {
-                g2.setColor(new Color(255, 255, 255, 120));
-                switch (dir) {
-                    case LEFT:
-                        g2.fillOval((int)Math.round(x)-10, (int)Math.round(y)-10, 20, 20);
-                        break;
-                    case RIGHT:
-                        g2.fillOval((int)Math.round(x)+10, (int)Math.round(y)-10, 20, 20);
-                        break;
-                    case UP:
-                        g2.fillOval((int)Math.round(x)-10, (int)Math.round(y)-10, 20, 20);
-                        break;
-                    case DOWN:
-                        g2.fillOval((int)Math.round(x)-10, (int)Math.round(y)+10, 20, 20);
-                        break;
-                }
+        private void drawTrail(Graphics2D g2, Color base, int centerX, int centerY) {
+            int alpha = 90;
+            for (int i = 0; i < trail.size(); i++) {
+                Point p = trail.get(i);
+                float t = 1f - (i / (float)trail.size());
+                int r = Math.max(6, (int)(20 * t));
+                g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), (int)(alpha * t)));
+                g2.fillOval(p.x - r/2, p.y - r/2, r, r);
             }
         }
     }
