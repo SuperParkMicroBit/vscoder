@@ -308,7 +308,7 @@ public class SimpleWindow extends JFrame {
                         g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 18 * i));
                         g2.fillRoundRect(ax-6-i*4, ay-6-i*2, aw+12+i*8, ah+12+i*4, 16, 16);
                     }
-                    gp = new GradientPaint(ax, ay, base, ax+aw, ay);
+                    gp = new GradientPaint((float)ax, (float)ay, accent, (float)(ax+aw), (float)ay, base);
                     g2.setPaint(gp);
                     g2.fillRoundRect(ax, ay, aw, ah, 12, 12);
                     g2.setColor(new Color(30,30,30,160));
