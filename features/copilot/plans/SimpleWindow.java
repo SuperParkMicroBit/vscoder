@@ -1,47 +1,310 @@
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Random;
 
 public class SimpleWindow extends JFrame {
     public SimpleWindow() {
         super("Simple Window - 音游 背景渐变");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(600, 600);
+        setSize(800, 800);
         setLocationRelativeTo(null);
 
-        // Add the drawing panel that displays a centered square on a purple gradient background
-        add(new DrawPanel());
+        GamePanel panel = new GamePanel();
+        add(panel);
+        // Focus to receive key events
+        panel.setFocusable(true);
+        panel.requestFocusInWindow();
     }
 
-    private static class DrawPanel extends JPanel {
+    private static class GamePanel extends JPanel {
+        private final List<Note> notes = new ArrayList<>();
+        private final Random rand = new Random();
+        private final Timer timer;
+        private int tick = 0;
+        private int score = 0;
+        private String feedback = "";
+
+        public GamePanel() {
+            // spawn/move at ~60fps
+            timer = new Timer(16, (ActionEvent e) -> gameLoop());
+            timer.start();
+
+            // Key bindings for arrow keys
+            getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0), "hitLeft");
+            getActionMap().put("hitLeft", new AbstractAction() {
+                @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.LEFT); }
+            });
+            getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, 0), "hitRight");
+            getActionMap().put("hitRight", new AbstractAction() {
+                @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.RIGHT); }
+            });
+            getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_UP, 0), "hitUp");
+            getActionMap().put("hitUp", new AbstractAction() {
+                @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.UP); }
+            });
+            getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_DOWN, 0), "hitDown");
+            getActionMap().put("hitDown", new AbstractAction() {
+                @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.DOWN); }
+            });
+
+            // spawn some initial notes
+            for (int i = 0; i < 3; i++) spawnRandomNote();
+        }
+
+        private void gameLoop() {
+            tick++;
+            // spawn a new note every ~60 frames (about 1 second)
+            if (tick % 60 == 0) spawnRandomNote();
+
+            // update notes
+            Iterator<Note> it = notes.iterator();
+            while (it.hasNext()) {
+                Note n = it.next();
+                n.update();
+                // remove notes that passed the center by some margin
+                if (n.isOutOfBounds(getWidth(), getHeight())) {
+                    it.remove();
+                    feedback = "Miss";
+                }
+            }
+
+            // fade feedback
+            if (!feedback.isEmpty() && tick % 30 == 0) feedback = "";
+
+            repaint();
+        }
+
+        private void spawnRandomNote() {
+            Note.Direction dir = Note.Direction.values()[rand.nextInt(4)];
+            // length = between 80 and 220 pixels to make long bars
+            int length = 80 + rand.nextInt(140);
+            // speed: pixels per tick (higher moves faster)
+            double speed = 4 + rand.nextDouble() * 3; // 4-7 px per tick
+            notes.add(new Note(dir, length, speed, getWidth(), getHeight()));
+        }
+
+        private void tryHit(Note.Direction dir) {
+            // hit window tolerance in pixels: how close leading edge should be to center border
+            final int tolerance = 20;
+            // find the closest note of that direction whose leading edge is within tolerance
+            Note best = null;
+            double bestDist = Double.MAX_VALUE;
+            for (Note n : notes) {
+                if (n.dir != dir) continue;
+                double dist = n.distanceToCenterEdge(getWidth(), getHeight());
+                if (Math.abs(dist) <= tolerance && Math.abs(dist) < Math.abs(bestDist)) {
+                    best = n;
+                    bestDist = dist;
+                }
+            }
+            if (best != null) {
+                // successful hit
+                score += 100;
+                feedback = "Hit +100";
+                notes.remove(best);
+            } else {
+                // bad hit (no note)
+                score = Math.max(0, score - 50);
+                feedback = "Bad";
+            }
+        }
+
         @Override
         protected void paintComponent(Graphics g) {
             super.paintComponent(g);
             Graphics2D g2 = (Graphics2D) g.create();
             try {
-                // Smooth rendering
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
                 // Purple gradient background (dark -> light)
-                Color darkPurple = new Color(75, 0, 130);   // indigo-like
+                Color darkPurple = new Color(75, 0, 130);
                 Color lightPurple = new Color(180, 100, 255);
                 GradientPaint gp = new GradientPaint(0, 0, darkPurple, getWidth(), getHeight(), lightPurple);
                 g2.setPaint(gp);
                 g2.fillRect(0, 0, getWidth(), getHeight());
 
-                // Square: now 1/4 of the smaller window dimension (previously 1/2)
+                // center square: 1/4 of smaller dimension
                 int size = Math.min(getWidth(), getHeight()) / 4;
-                int x = (getWidth() - size) / 2;
-                int y = (getHeight() - size) / 2;
+                int cx = (getWidth() - size) / 2;
+                int cy = (getHeight() - size) / 2;
 
-                // Draw filled square and border
-                g2.setColor(new Color(0, 170, 255)); // blue-cyan fill for contrast
-                g2.fillRect(x, y, size, size);
+                // draw center square border (hit areas are its four edges)
+                g2.setColor(new Color(50, 50, 50, 200));
+                g2.fillRect(cx - 6, cy - 6, size + 12, size + 12); // subtle frame behind
 
-                g2.setStroke(new BasicStroke(3f));
+                g2.setColor(new Color(0, 170, 255));
+                g2.fillRect(cx, cy, size, size);
+
+                g2.setStroke(new BasicStroke(4f));
                 g2.setColor(Color.BLACK);
-                g2.drawRect(x, y, size, size);
+                g2.drawRect(cx, cy, size, size);
+
+                // draw notes
+                for (Note n : notes) n.draw(g2, getWidth(), getHeight(), cx, cy, size);
+
+                // draw UI: score and feedback
+                g2.setColor(Color.WHITE);
+                g2.setFont(new Font("SansSerif", Font.BOLD, 20));
+                g2.drawString("Score: " + score, 16, 28);
+
+                if (!feedback.isEmpty()) {
+                    g2.setFont(new Font("SansSerif", Font.BOLD, 28));
+                    FontMetrics fm = g2.getFontMetrics();
+                    int fw = fm.stringWidth(feedback);
+                    g2.drawString(feedback, getWidth()/2 - fw/2, 40);
+                }
+
+                // draw direction hints
+                int hintSize = 40;
+                g2.setFont(new Font("SansSerif", Font.PLAIN, 14));
+                g2.drawString("←", 10, getHeight()/2);
+                g2.drawString("→", getWidth()-24, getHeight()/2);
+                g2.drawString("↑", getWidth()/2 - 6, 24);
+                g2.drawString("↓", getWidth()/2 - 6, getHeight()-8);
+
             } finally {
                 g2.dispose();
+            }
+        }
+    }
+
+    private static class Note {
+        enum Direction {LEFT, RIGHT, UP, DOWN}
+
+        final Direction dir;
+        double x, y; // leading edge position (depends on direction)
+        final int length; // note length in pixels
+        final double speed; // movement per tick (pixels)
+
+        public Note(Direction dir, int length, double speed, int panelW, int panelH) {
+            this.dir = dir;
+            this.length = length;
+            this.speed = speed;
+            // initialize position so note starts just outside the panel
+            switch (dir) {
+                case LEFT:
+                    // come from left moving right: leading edge x = -length
+                    x = -length;
+                    y = panelH / 2.0; // center vertically
+                    break;
+                case RIGHT:
+                    // come from right moving left: leading edge x = panelW + length
+                    x = panelW + length;
+                    y = panelH / 2.0;
+                    break;
+                case UP:
+                    // come from top moving down: leading edge y = -length
+                    y = -length;
+                    x = panelW / 2.0;
+                    break;
+                default: // DOWN
+                    // come from bottom moving up
+                    y = panelH + length;
+                    x = panelW / 2.0;
+                    break;
+            }
+        }
+
+        public void update() {
+            switch (dir) {
+                case LEFT: x += speed; break; // moving right
+                case RIGHT: x -= speed; break; // moving left
+                case UP: y += speed; break; // moving down
+                case DOWN: y -= speed; break; // moving up
+            }
+        }
+
+        public boolean isOutOfBounds(int panelW, int panelH) {
+            // if passed beyond center significantly
+            return x < -length*2 || x > panelW + length*2 || y < -length*2 || y > panelH + length*2;
+        }
+
+        // distance from leading edge to the center square edge along travel axis
+        public double distanceToCenterEdge(int panelW, int panelH) {
+            int size = Math.min(panelW, panelH) / 4;
+            int cx = (panelW - size) / 2;
+            int cy = (panelH - size) / 2;
+            switch (dir) {
+                case LEFT:
+                    // leading x should match left edge (cx)
+                    return x - cx;
+                case RIGHT:
+                    // leading x should match right edge (cx+size)
+                    return x - (cx + size);
+                case UP:
+                    return y - cy;
+                case DOWN:
+                    return y - (cy + size);
+            }
+            return Double.MAX_VALUE;
+        }
+
+        public void draw(Graphics2D g2, int panelW, int panelH, int cx, int cy, int size) {
+            g2.setColor(new Color(255, 220, 80));
+            int ax, ay, aw, ah;
+            switch (dir) {
+                case LEFT:
+                    // horizontal bar moving right: draw rectangle with leading edge at x and length extend leftwards
+                    aw = length;
+                    ah = 30;
+                    ax = (int) Math.round(x - (aw));
+                    ay = (int) Math.round(y - ah/2.0);
+                    g2.fillRoundRect(ax, ay, aw, ah, 8, 8);
+                    g2.setColor(Color.BLACK);
+                    g2.drawRoundRect(ax, ay, aw, ah, 8, 8);
+                    break;
+                case RIGHT:
+                    aw = length;
+                    ah = 30;
+                    ax = (int) Math.round(x);
+                    ay = (int) Math.round(y - ah/2.0);
+                    g2.fillRoundRect(ax, ay, aw, ah, 8, 8);
+                    g2.setColor(Color.BLACK);
+                    g2.drawRoundRect(ax, ay, aw, ah, 8, 8);
+                    break;
+                case UP:
+                    ah = length;
+                    aw = 30;
+                    ay = (int) Math.round(y - ah);
+                    ax = (int) Math.round(x - aw/2.0);
+                    g2.fillRoundRect(ax, ay, aw, ah, 8, 8);
+                    g2.setColor(Color.BLACK);
+                    g2.drawRoundRect(ax, ay, aw, ah, 8, 8);
+                    break;
+                case DOWN:
+                    ah = length;
+                    aw = 30;
+                    ay = (int) Math.round(y);
+                    ax = (int) Math.round(x - aw/2.0);
+                    g2.fillRoundRect(ax, ay, aw, ah, 8, 8);
+                    g2.setColor(Color.BLACK);
+                    g2.drawRoundRect(ax, ay, aw, ah, 8, 8);
+                    break;
+            }
+
+            // Optionally draw a small marker when the leading edge is close to the hit edge
+            double dist = distanceToCenterEdge(panelW, panelH);
+            if (Math.abs(dist) < 40) {
+                g2.setColor(new Color(255, 255, 255, 120));
+                switch (dir) {
+                    case LEFT:
+                        g2.fillOval((int)Math.round(x)-10, (int)Math.round(y)-10, 20, 20);
+                        break;
+                    case RIGHT:
+                        g2.fillOval((int)Math.round(x)+10, (int)Math.round(y)-10, 20, 20);
+                        break;
+                    case UP:
+                        g2.fillOval((int)Math.round(x)-10, (int)Math.round(y)-10, 20, 20);
+                        break;
+                    case DOWN:
+                        g2.fillOval((int)Math.round(x)-10, (int)Math.round(y)+10, 20, 20);
+                        break;
+                }
             }
         }
     }
