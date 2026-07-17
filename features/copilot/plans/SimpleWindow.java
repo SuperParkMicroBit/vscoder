@@ -81,8 +81,8 @@ public class SimpleWindow extends JFrame {
 
         private void spawnRandomNote() {
             Note.Direction dir = Note.Direction.values()[rand.nextInt(4)];
-            // length = between 80 and 220 pixels to make long bars
-            int length = 80 + rand.nextInt(140);
+            // fixed length for all notes
+            int length = Note.NOTE_LENGTH;
             // speed: pixels per tick (higher moves faster)
             double speed = 4 + rand.nextDouble() * 3; // 4-7 px per tick
             notes.add(new Note(dir, length, speed, getWidth(), getHeight()));
@@ -160,12 +160,14 @@ public class SimpleWindow extends JFrame {
                 }
 
                 // draw direction hints
-                int hintSize = 40;
-                g2.setFont(new Font("SansSerif", Font.PLAIN, 14));
-                g2.drawString("←", 10, getHeight()/2);
-                g2.drawString("→", getWidth()-24, getHeight()/2);
-                g2.drawString("↑", getWidth()/2 - 6, 24);
-                g2.drawString("↓", getWidth()/2 - 6, getHeight()-8);
+                g2.setFont(new Font("SansSerif", Font.PLAIN, 24));
+                FontMetrics hintFm = g2.getFontMetrics();
+                int hintW = hintFm.stringWidth("←");
+                g2.drawString("←", 10, getHeight()/2 + hintFm.getAscent()/2 - 4);
+                g2.drawString("→", getWidth()-10-hintW, getHeight()/2 + hintFm.getAscent()/2 - 4);
+                int upW = hintFm.stringWidth("↑");
+                g2.drawString("↑", getWidth()/2 - upW/2, 30);
+                g2.drawString("↓", getWidth()/2 - upW/2, getHeight()-10);
 
             } finally {
                 g2.dispose();
@@ -176,9 +178,13 @@ public class SimpleWindow extends JFrame {
     private static class Note {
         enum Direction {LEFT, RIGHT, UP, DOWN}
 
+        // fixed note length (long dimension) and thickness (short dimension)
+        static final int NOTE_LENGTH = 200;
+        static final int THICKNESS = 30;
+
         final Direction dir;
-        double x, y; // leading edge position (depends on direction)
-        final int length; // note length in pixels
+        double x, y; // leading edge position along travel axis (for LEFT/RIGHT: x is leading; for UP/DOWN: y is leading)
+        final int length; // long dimension in pixels (NOTE_LENGTH)
         final double speed; // movement per tick (pixels)
 
         public Note(Direction dir, int length, double speed, int panelW, int panelH) {
@@ -188,23 +194,23 @@ public class SimpleWindow extends JFrame {
             // initialize position so note starts just outside the panel
             switch (dir) {
                 case LEFT:
-                    // come from left moving right: leading edge x = -length
-                    x = -length;
+                    // come from left moving right: leading edge x = -THICKNESS (right edge is leading)
+                    x = -THICKNESS;
                     y = panelH / 2.0; // center vertically
                     break;
                 case RIGHT:
-                    // come from right moving left: leading edge x = panelW + length
-                    x = panelW + length;
+                    // come from right moving left: leading edge x = panelW + THICKNESS (left edge is leading)
+                    x = panelW + THICKNESS;
                     y = panelH / 2.0;
                     break;
                 case UP:
-                    // come from top moving down: leading edge y = -length
-                    y = -length;
+                    // come from top moving down: leading edge y = -THICKNESS (bottom edge is leading)
+                    y = -THICKNESS;
                     x = panelW / 2.0;
                     break;
                 default: // DOWN
-                    // come from bottom moving up
-                    y = panelH + length;
+                    // come from bottom moving up: leading edge y = panelH + THICKNESS (top edge is leading)
+                    y = panelH + THICKNESS;
                     x = panelW / 2.0;
                     break;
             }
@@ -220,8 +226,8 @@ public class SimpleWindow extends JFrame {
         }
 
         public boolean isOutOfBounds(int panelW, int panelH) {
-            // if passed beyond center significantly
-            return x < -length*2 || x > panelW + length*2 || y < -length*2 || y > panelH + length*2;
+            // if passed beyond panel by margin
+            return x < -length*2 && x < -THICKNESS*2 || x > panelW + length*2 || y < -length*2 || y > panelH + length*2;
         }
 
         // distance from leading edge to the center square edge along travel axis
@@ -249,38 +255,41 @@ public class SimpleWindow extends JFrame {
             int ax, ay, aw, ah;
             switch (dir) {
                 case LEFT:
-                    // horizontal bar moving right: draw rectangle with leading edge at x and length extend leftwards
-                    aw = length;
-                    ah = 30;
-                    ax = (int) Math.round(x - (aw));
-                    ay = (int) Math.round(y - ah/2.0);
+                    // vertical bar (tall) moving right: thickness horizontally, length vertically, right edge at x
+                    aw = THICKNESS;
+                    ah = length;
+                    ax = (int) Math.round(x - aw); // left x = leading right edge - thickness
+                    ay = (int) Math.round(y - ah / 2.0);
                     g2.fillRoundRect(ax, ay, aw, ah, 8, 8);
                     g2.setColor(Color.BLACK);
                     g2.drawRoundRect(ax, ay, aw, ah, 8, 8);
                     break;
                 case RIGHT:
-                    aw = length;
-                    ah = 30;
+                    // vertical bar moving left: left edge at x
+                    aw = THICKNESS;
+                    ah = length;
                     ax = (int) Math.round(x);
-                    ay = (int) Math.round(y - ah/2.0);
+                    ay = (int) Math.round(y - ah / 2.0);
                     g2.fillRoundRect(ax, ay, aw, ah, 8, 8);
                     g2.setColor(Color.BLACK);
                     g2.drawRoundRect(ax, ay, aw, ah, 8, 8);
                     break;
                 case UP:
-                    ah = length;
-                    aw = 30;
+                    // horizontal bar moving down: bottom edge at y
+                    aw = length;
+                    ah = THICKNESS;
                     ay = (int) Math.round(y - ah);
-                    ax = (int) Math.round(x - aw/2.0);
+                    ax = (int) Math.round(x - aw / 2.0);
                     g2.fillRoundRect(ax, ay, aw, ah, 8, 8);
                     g2.setColor(Color.BLACK);
                     g2.drawRoundRect(ax, ay, aw, ah, 8, 8);
                     break;
                 case DOWN:
-                    ah = length;
-                    aw = 30;
+                    // horizontal bar moving up: top edge at y
+                    aw = length;
+                    ah = THICKNESS;
                     ay = (int) Math.round(y);
-                    ax = (int) Math.round(x - aw/2.0);
+                    ax = (int) Math.round(x - aw / 2.0);
                     g2.fillRoundRect(ax, ay, aw, ah, 8, 8);
                     g2.setColor(Color.BLACK);
                     g2.drawRoundRect(ax, ay, aw, ah, 8, 8);
