@@ -30,14 +30,14 @@ public class SimpleWindow extends JFrame {
         private int score = 0;
         private String feedback = "";
         private int combo = 0;
-        private float comboPulse = 0f; // 用于连击放大脉冲动画
-        private int hitFlash = 0; // 命中时中心短暂高亮帧计数
+        private float comboPulse = 0f; // used for simple pulse animation on combo
+        private int hitFlash = 0; // frames to flash center on hit
 
         public GamePanel() {
             timer = new Timer(16, (ActionEvent e) -> gameLoop());
             timer.start();
 
-            // 方向键映射
+            // Key bindings
             getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0), "hitLeft");
             getActionMap().put("hitLeft", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.LEFT); }});
             getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, 0), "hitRight");
@@ -47,33 +47,34 @@ public class SimpleWindow extends JFrame {
             getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_DOWN, 0), "hitDown");
             getActionMap().put("hitDown", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.DOWN); }});
 
-            // 初始音符
+            // spawn initial notes
             for (int i = 0; i < 4; i++) spawnRandomNote();
         }
 
         private void gameLoop() {
             tick++;
-            if (tick % 45 == 0) spawnRandomNote(); // 生成速率，可调
+            if (tick % 45 == 0) spawnRandomNote(); // spawn rate
 
             Iterator<Note> it = notes.iterator();
             while (it.hasNext()) {
                 Note n = it.next();
                 n.update();
 
-                // 如果音符越过中心判定区 -> Miss 并移除
-                final int passLimit = 30; // 超过中心多少像素视为 Miss
+                // if note passed center without being hit -> miss and remove
+                final int passLimit = 30; // pixels beyond center considered miss
                 if (n.hasPassedCenter(getWidth(), getHeight(), passLimit)) {
                     it.remove();
-                    combo = 0;
+                    combo = 0; // reset combo on miss
                     feedback = "Miss";
                     continue;
                 }
-                // 如果完全移出画面也移除
+                // also remove if completely out of screen bounds
                 if (n.isOutOfBounds(getWidth(), getHeight())) {
                     it.remove();
                 }
             }
 
+            // combo pulse decay
             if (comboPulse > 0f) comboPulse *= 0.88f;
             if (hitFlash > 0) hitFlash--;
 
@@ -85,12 +86,12 @@ public class SimpleWindow extends JFrame {
         private void spawnRandomNote() {
             Note.Direction dir = Note.Direction.values()[rand.nextInt(4)];
             int length = Note.minLength + rand.nextInt(Note.maxLength - Note.minLength + 1);
-            double speed = 3.5 + rand.nextDouble() * 3.5; // 速度范围，可调
+            double speed = 3.5 + rand.nextDouble() * 3.5; // 3.5 - 7
             notes.add(new Note(dir, length, speed, getWidth(), getHeight()));
         }
 
         private void tryHit(Note.Direction dir) {
-            final int tolerance = 24; // 判定容差像素
+            final int tolerance = 24;
             Note best = null;
             double bestDist = Double.MAX_VALUE;
             for (Note n : notes) {
@@ -105,7 +106,7 @@ public class SimpleWindow extends JFrame {
                 score += 100;
                 combo++;
                 feedback = "Hit";
-                comboPulse = 1.2f;
+                comboPulse = 1.2f; // trigger pulse
                 hitFlash = 6;
                 notes.remove(best);
             } else {
@@ -122,19 +123,19 @@ public class SimpleWindow extends JFrame {
             try {
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-                // 紫色渐变背景
+                // purple gradient background
                 Color darkPurple = new Color(45, 0, 90);
                 Color lightPurple = new Color(170, 80, 255);
                 GradientPaint gp = new GradientPaint(0, 0, darkPurple, getWidth(), getHeight(), lightPurple);
                 g2.setPaint(gp);
                 g2.fillRect(0, 0, getWidth(), getHeight());
 
-                // 中心正方形
+                // center square
                 int size = Math.min(getWidth(), getHeight()) / 4;
                 int cx = (getWidth() - size) / 2;
                 int cy = (getHeight() - size) / 2;
 
-                // 中心边框（命中时高亮）
+                // draw center frame (slightly glowing when hit)
                 if (hitFlash > 0) {
                     g2.setColor(new Color(255, 255, 255, 100));
                     g2.fillRoundRect(cx - 12, cy - 12, size + 24, size + 24, 16, 16);
@@ -142,21 +143,22 @@ public class SimpleWindow extends JFrame {
                     g2.setColor(new Color(30, 30, 30, 160));
                     g2.fillRoundRect(cx - 8, cy - 8, size + 16, size + 16, 12, 12);
                 }
+
                 g2.setColor(new Color(20, 160, 240));
                 g2.fillRoundRect(cx, cy, size, size, 12, 12);
                 g2.setStroke(new BasicStroke(4f));
                 g2.setColor(Color.BLACK);
                 g2.drawRoundRect(cx, cy, size, size, 12, 12);
 
-                // 绘制音符
+                // draw notes (phigros style)
                 for (Note n : notes) n.drawPhigros(g2, getWidth(), getHeight(), cx, cy, size);
 
-                // 分数显示
+                // draw UI: score
                 g2.setColor(Color.WHITE);
                 g2.setFont(new Font("SansSerif", Font.BOLD, 20));
                 g2.drawString("Score: " + score, 16, 28);
 
-                // 命中/失误反馈
+                // feedback
                 if (!feedback.isEmpty()) {
                     g2.setFont(new Font("SansSerif", Font.BOLD, 28));
                     FontMetrics fm = g2.getFontMetrics();
@@ -164,7 +166,7 @@ public class SimpleWindow extends JFrame {
                     g2.drawString(feedback, getWidth()/2 - fw/2, 40);
                 }
 
-                // 连击显示（Phigros 风格）
+                // combo display near center, phigros style
                 if (combo > 0) {
                     String cText = String.valueOf(combo);
                     float scale = 1.0f + comboPulse * 0.9f;
@@ -185,19 +187,21 @@ public class SimpleWindow extends JFrame {
                     else if (combo >= 10) comboColor = new Color(255, 220, 120);
                     else comboColor = new Color(255, 255, 255, 230);
 
-                    // 外发光（stroke）
+                    // outer glow (stroke)
                     g2.setColor(new Color(comboColor.getRed(), comboColor.getGreen(), comboColor.getBlue(), 60));
                     g2.setStroke(new BasicStroke(fontSize / 2f));
                     g2.draw(glyph);
 
-                    // 填充与描边
+                    // fill main
                     g2.setColor(comboColor);
                     g2.fill(glyph);
+
+                    // outline
                     g2.setColor(Color.BLACK);
                     g2.setStroke(new BasicStroke(Math.max(2f, fontSize / 18f)));
                     g2.draw(glyph);
 
-                    // 下方小字 COMBO
+                    // draw label "COMBO" below
                     String label = "COMBO";
                     Font labelFont = new Font("SansSerif", Font.BOLD, Math.max(14, fontSize/4));
                     g2.setFont(labelFont);
@@ -209,7 +213,7 @@ public class SimpleWindow extends JFrame {
                     g2.drawString(label, lx, ly);
                 }
 
-                // 方向提示
+                // draw direction hints
                 g2.setFont(new Font("SansSerif", Font.PLAIN, 22));
                 FontMetrics hintFm = g2.getFontMetrics();
                 int hintW = hintFm.stringWidth("←");
@@ -229,14 +233,15 @@ public class SimpleWindow extends JFrame {
     private static class Note {
         enum Direction {LEFT, RIGHT, UP, DOWN}
 
-        // 沿移动方向的可变长度，短边在绘制时等于中心正方形宽度
+        // allow variable length for visual depth; short side will match center square width
         static final int minLength = 80;
         static final int maxLength = 420;
-        static final int THICKNESS = 36; // 用于初始生成时的偏移，不用于渲染短边
+        static final int DEPTH = 18; // small depth along travel axis (the "short" side)
+        static final int SPAWN_OFFSET = 36; // offset for initial spawn outside screen
 
         final Direction dir;
-        double x, y; // 前端位置
-        final int length;
+        double x, y; // leading edge position (the edge facing the center)
+        final int length; // visual extension away from center (unused now for facing side)
         final double speed;
         final List<Point> trail = new ArrayList<>();
 
@@ -246,13 +251,13 @@ public class SimpleWindow extends JFrame {
             this.speed = speed;
             switch (dir) {
                 case LEFT:
-                    x = -THICKNESS; y = panelH / 2.0; break;
+                    x = -SPAWN_OFFSET; y = panelH / 2.0; break;
                 case RIGHT:
-                    x = panelW + THICKNESS; y = panelH / 2.0; break;
+                    x = panelW + SPAWN_OFFSET; y = panelH / 2.0; break;
                 case UP:
-                    y = -THICKNESS; x = panelW / 2.0; break;
+                    y = -SPAWN_OFFSET; x = panelW / 2.0; break;
                 default:
-                    y = panelH + THICKNESS; x = panelW / 2.0; break;
+                    y = panelH + SPAWN_OFFSET; x = panelW / 2.0; break;
             }
             trail.add(new Point((int)x, (int)y));
         }
@@ -269,7 +274,7 @@ public class SimpleWindow extends JFrame {
         }
 
         public boolean isOutOfBounds(int panelW, int panelH) {
-            return x < -length*2 || x > panelW + length*2 || y < -length*2 || y > panelH + length*2;
+            return x < -maxLength*2 || x > panelW + maxLength*2 || y < -maxLength*2 || y > panelH + maxLength*2;
         }
 
         public boolean hasPassedCenter(int panelW, int panelH, int passLimit) {
@@ -307,11 +312,13 @@ public class SimpleWindow extends JFrame {
 
             switch (dir) {
                 case LEFT:
-                    aw = size; ah = length; ax = (int)Math.round(x - aw); ay = (int)Math.round(y - ah/2.0);
+                    // short depth along X, height equals center square width
+                    aw = DEPTH; ah = size; ax = (int)Math.round(x - aw); ay = (int)Math.round(y - ah/2.0);
                     drawTrail(g2, base);
+                    // glow layers: width = center width
                     for (int i = 5; i >= 1; i--) {
                         g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 20 * i));
-                        g2.fillRoundRect(ax-6-i*2, ay-6-i*4, aw+12+i*4, ah+12+i*8, 16, 16);
+                        g2.fillRoundRect(cx - (aw/2) - 6 - i*2, ay-6-i*4, size+12+i*4, ah+12+i*8, 16, 16);
                     }
                     GradientPaint gp = new GradientPaint(ax, ay, accent, ax, ay+ah, base);
                     g2.setPaint(gp);
@@ -320,11 +327,11 @@ public class SimpleWindow extends JFrame {
                     g2.drawRoundRect(ax, ay, aw, ah, 12, 12);
                     break;
                 case RIGHT:
-                    aw = size; ah = length; ax = (int)Math.round(x); ay = (int)Math.round(y - ah/2.0);
+                    aw = DEPTH; ah = size; ax = (int)Math.round(x); ay = (int)Math.round(y - ah/2.0);
                     drawTrail(g2, base);
                     for (int i = 5; i >= 1; i--) {
                         g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 20 * i));
-                        g2.fillRoundRect(ax-6-i*2, ay-6-i*4, aw+12+i*4, ah+12+i*8, 16, 16);
+                        g2.fillRoundRect(cx - (aw/2) - 6 - i*2, ay-6-i*4, size+12+i*4, ah+12+i*8, 16, 16);
                     }
                     gp = new GradientPaint(ax, ay, base, ax, ay+ah, accent);
                     g2.setPaint(gp);
@@ -333,11 +340,11 @@ public class SimpleWindow extends JFrame {
                     g2.drawRoundRect(ax, ay, aw, ah, 12, 12);
                     break;
                 case UP:
-                    aw = length; ah = size; ay = (int)Math.round(y - ah); ax = (int)Math.round(x - aw/2.0);
+                    aw = size; ah = DEPTH; ay = (int)Math.round(y - ah); ax = (int)Math.round(x - aw/2.0);
                     drawTrail(g2, base);
                     for (int i = 5; i >= 1; i--) {
                         g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 18 * i));
-                        g2.fillRoundRect(ax-6-i*4, ay-6-i*2, aw+12+i*8, ah+12+i*4, 16, 16);
+                        g2.fillRoundRect(ax-6-i*4, cy - (ah/2) - 6 - i*2, aw+12+i*8, ah+12+i*4, 16, 16);
                     }
                     gp = new GradientPaint(ax, ay, accent, ax+aw, ay, base);
                     g2.setPaint(gp);
@@ -346,11 +353,11 @@ public class SimpleWindow extends JFrame {
                     g2.drawRoundRect(ax, ay, aw, ah, 12, 12);
                     break;
                 default: // DOWN
-                    aw = length; ah = size; ay = (int)Math.round(y); ax = (int)Math.round(x - aw/2.0);
+                    aw = size; ah = DEPTH; ay = (int)Math.round(y); ax = (int)Math.round(x - aw/2.0);
                     drawTrail(g2, base);
                     for (int i = 5; i >= 1; i--) {
                         g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 18 * i));
-                        g2.fillRoundRect(ax-6-i*4, ay-6-i*2, aw+12+i*8, ah+12+i*4, 16, 16);
+                        g2.fillRoundRect(ax-6-i*4, cy - (ah/2) - 6 - i*2, aw+12+i*8, ah+12+i*4, 16, 16);
                     }
                     gp = new GradientPaint((float)ax, (float)ay, accent, (float)(ax+aw), (float)ay, base);
                     g2.setPaint(gp);
