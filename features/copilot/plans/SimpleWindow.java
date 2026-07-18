@@ -312,58 +312,87 @@ public class SimpleWindow extends JFrame {
 
             switch (dir) {
                 case LEFT:
-                    // short depth along X, height equals center square width
-                    aw = DEPTH; ah = size; ax = (int)Math.round(x - aw); ay = (int)Math.round(y - ah/2.0);
+                    // draw as a vertical line segment centered at y (replaces rectangle)
+                    int lineLen = size;
+                    int xPos = (int)Math.round(x);
+                    int y1 = (int)Math.round(y - lineLen/2.0);
+                    int y2 = (int)Math.round(y + lineLen/2.0);
                     drawTrail(g2, base);
-                    // glow layers: width = center width
+                    // glow layers (thick stroked lines)
                     for (int i = 5; i >= 1; i--) {
                         g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 20 * i));
-                        g2.fillRoundRect(cx - (aw/2) - 6 - i*2, ay-6-i*4, size+12+i*4, ah+12+i*8, 16, 16);
+                        g2.setStroke(new BasicStroke(DEPTH + i*6, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                        g2.drawLine(xPos, y1, xPos, y2);
                     }
-                    GradientPaint gp = new GradientPaint(ax, ay, accent, ax, ay+ah, base);
+                    // main gradient stroke
+                    GradientPaint gp = new GradientPaint(xPos, y1, accent, xPos, y2, base);
                     g2.setPaint(gp);
-                    g2.fillRoundRect(ax, ay, aw, ah, 12, 12);
+                    g2.setStroke(new BasicStroke(DEPTH, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    g2.drawLine(xPos, y1, xPos, y2);
+                    // outline
                     g2.setColor(new Color(30,30,30,160));
-                    g2.drawRoundRect(ax, ay, aw, ah, 12, 12);
+                    g2.setStroke(new BasicStroke(Math.max(2f, DEPTH / 6f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    g2.drawLine(xPos, y1, xPos, y2);
                     break;
                 case RIGHT:
-                    aw = DEPTH; ah = size; ax = (int)Math.round(x); ay = (int)Math.round(y - ah/2.0);
+                    // draw as a vertical line segment centered at y (replaces rectangle)
+                    lineLen = size;
+                    xPos = (int)Math.round(x);
+                    y1 = (int)Math.round(y - lineLen/2.0);
+                    y2 = (int)Math.round(y + lineLen/2.0);
                     drawTrail(g2, base);
                     for (int i = 5; i >= 1; i--) {
                         g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 20 * i));
-                        g2.fillRoundRect(cx - (aw/2) - 6 - i*2, ay-6-i*4, size+12+i*4, ah+12+i*8, 16, 16);
+                        g2.setStroke(new BasicStroke(DEPTH + i*6, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                        g2.drawLine(xPos, y1, xPos, y2);
                     }
-                    gp = new GradientPaint(ax, ay, base, ax, ay+ah, accent);
+                    gp = new GradientPaint(xPos, y1, base, xPos, y2, accent);
                     g2.setPaint(gp);
-                    g2.fillRoundRect(ax, ay, aw, ah, 12, 12);
+                    g2.setStroke(new BasicStroke(DEPTH, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    g2.drawLine(xPos, y1, xPos, y2);
                     g2.setColor(new Color(30,30,30,160));
-                    g2.drawRoundRect(ax, ay, aw, ah, 12, 12);
+                    g2.setStroke(new BasicStroke(Math.max(2f, DEPTH / 6f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    g2.drawLine(xPos, y1, xPos, y2);
                     break;
                 case UP:
-                    aw = size; ah = DEPTH; ay = (int)Math.round(y - ah); ax = (int)Math.round(x - aw/2.0);
+                    // draw as a horizontal line segment centered at x (replaces rectangle)
+                    int hLineLen = size;
+                    int yPos = (int)Math.round(y);
+                    int x1 = (int)Math.round(x - hLineLen/2.0);
+                    int x2 = (int)Math.round(x + hLineLen/2.0);
                     drawTrail(g2, base);
                     for (int i = 5; i >= 1; i--) {
                         g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 18 * i));
-                        g2.fillRoundRect(ax-6-i*4, cy - (ah/2) - 6 - i*2, aw+12+i*8, ah+12+i*4, 16, 16);
+                        g2.setStroke(new BasicStroke(DEPTH + i*6, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                        g2.drawLine(x1, yPos, x2, yPos);
                     }
-                    gp = new GradientPaint(ax, ay, accent, ax+aw, ay, base);
+                    gp = new GradientPaint(x1, yPos, accent, x2, yPos, base);
                     g2.setPaint(gp);
-                    g2.fillRoundRect(ax, ay, aw, ah, 12, 12);
+                    g2.setStroke(new BasicStroke(DEPTH, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    g2.drawLine(x1, yPos, x2, yPos);
                     g2.setColor(new Color(30,30,30,160));
-                    g2.drawRoundRect(ax, ay, aw, ah, 12, 12);
+                    g2.setStroke(new BasicStroke(Math.max(2f, DEPTH / 6f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    g2.drawLine(x1, yPos, x2, yPos);
                     break;
                 default: // DOWN
-                    aw = size; ah = DEPTH; ay = (int)Math.round(y); ax = (int)Math.round(x - aw/2.0);
+                    // draw as a horizontal line segment centered at x (replaces rectangle)
+                    int hLen = size;
+                    int yP = (int)Math.round(y);
+                    int xStart = (int)Math.round(x - hLen/2.0);
+                    int xEnd = (int)Math.round(x + hLen/2.0);
                     drawTrail(g2, base);
                     for (int i = 5; i >= 1; i--) {
                         g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 18 * i));
-                        g2.fillRoundRect(ax-6-i*4, cy - (ah/2) - 6 - i*2, aw+12+i*8, ah+12+i*4, 16, 16);
+                        g2.setStroke(new BasicStroke(DEPTH + i*6, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                        g2.drawLine(xStart, yP, xEnd, yP);
                     }
-                    gp = new GradientPaint((float)ax, (float)ay, accent, (float)(ax+aw), (float)ay, base);
+                    gp = new GradientPaint(xStart, yP, accent, xEnd, yP, base);
                     g2.setPaint(gp);
-                    g2.fillRoundRect(ax, ay, aw, ah, 12, 12);
+                    g2.setStroke(new BasicStroke(DEPTH, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    g2.drawLine(xStart, yP, xEnd, yP);
                     g2.setColor(new Color(30,30,30,160));
-                    g2.drawRoundRect(ax, ay, aw, ah, 12, 12);
+                    g2.setStroke(new BasicStroke(Math.max(2f, DEPTH / 6f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                    g2.drawLine(xStart, yP, xEnd, yP);
                     break;
             }
         }
