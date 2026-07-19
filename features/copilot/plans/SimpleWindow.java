@@ -32,20 +32,29 @@ public class SimpleWindow extends JFrame {
         private int combo = 0;
         private float comboPulse = 0f; // used for simple pulse animation on combo
         private int hitFlash = 0; // frames to flash center on hit
+        private final boolean[] holding = new boolean[Note.Direction.values().length];
 
         public GamePanel() {
             timer = new Timer(16, (ActionEvent e) -> gameLoop());
             timer.start();
 
-            // Key bindings
-            getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0), "hitLeft");
-            getActionMap().put("hitLeft", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.LEFT); }});
-            getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, 0), "hitRight");
-            getActionMap().put("hitRight", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.RIGHT); }});
-            getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_UP, 0), "hitUp");
-            getActionMap().put("hitUp", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.UP); }});
-            getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_DOWN, 0), "hitDown");
-            getActionMap().put("hitDown", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { tryHit(Note.Direction.DOWN); }});
+            // Key bindings (press and release to support hold notes)
+            getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0, false), "pressLeft");
+            getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0, true), "releaseLeft");
+            getActionMap().put("pressLeft", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { holding[Note.Direction.LEFT.ordinal()] = true; tryHit(Note.Direction.LEFT); }});
+            getActionMap().put("releaseLeft", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { holding[Note.Direction.LEFT.ordinal()] = false; }});
+            getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, 0, false), "pressRight");
+            getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, 0, true), "releaseRight");
+            getActionMap().put("pressRight", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { holding[Note.Direction.RIGHT.ordinal()] = true; tryHit(Note.Direction.RIGHT); }});
+            getActionMap().put("releaseRight", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { holding[Note.Direction.RIGHT.ordinal()] = false; }});
+            getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_UP, 0, false), "pressUp");
+            getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_UP, 0, true), "releaseUp");
+            getActionMap().put("pressUp", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { holding[Note.Direction.UP.ordinal()] = true; tryHit(Note.Direction.UP); }});
+            getActionMap().put("releaseUp", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { holding[Note.Direction.UP.ordinal()] = false; }});
+            getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_DOWN, 0, false), "pressDown");
+            getInputMap(WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_DOWN, 0, true), "releaseDown");
+            getActionMap().put("pressDown", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { holding[Note.Direction.DOWN.ordinal()] = true; tryHit(Note.Direction.DOWN); }});
+            getActionMap().put("releaseDown", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { holding[Note.Direction.DOWN.ordinal()] = false; }});
 
             // spawn initial notes
             for (int i = 0; i < 4; i++) spawnRandomNote();
@@ -62,12 +71,43 @@ public class SimpleWindow extends JFrame {
 
                 // if note passed center without being hit -> miss and remove
                 final int passLimit = 30; // pixels beyond center considered miss
-                if (n.hasPassedCenter(getWidth(), getHeight(), passLimit)) {
-                    it.remove();
-                    combo = 0; // reset combo on miss
-                    feedback = "Miss";
-                    continue;
+                final int holdTolerance = 48; // larger window for hold progress
+
+                if (n.isHold) {
+                    double dist = n.distanceToCenterEdge(getWidth(), getHeight());
+                    if (Math.abs(dist) <= holdTolerance) {
+                        if (holding[n.dir.ordinal()]) {
+                            n.holdProgress++;
+                            if (n.holdProgress >= n.holdRequired) {
+                                score += 150; // reward for successful hold
+                                combo++;
+                                feedback = "Hold OK";
+                                comboPulse = 1.2f;
+                                hitFlash = 6;
+                                it.remove();
+                                continue;
+                            }
+                        } else {
+                            // slowly decay progress when not holding
+                            if (n.holdProgress > 0 && tick % 4 == 0) n.holdProgress = Math.max(0, n.holdProgress - 1);
+                        }
+                    }
+
+                    if (n.hasPassedCenter(getWidth(), getHeight(), passLimit)) {
+                        it.remove();
+                        combo = 0; // reset combo on miss
+                        feedback = "Miss";
+                        continue;
+                    }
+                } else {
+                    if (n.hasPassedCenter(getWidth(), getHeight(), passLimit)) {
+                        it.remove();
+                        combo = 0; // reset combo on miss
+                        feedback = "Miss";
+                        continue;
+                    }
                 }
+
                 // also remove if completely out of screen bounds
                 if (n.isOutOfBounds(getWidth(), getHeight())) {
                     it.remove();
@@ -87,7 +127,10 @@ public class SimpleWindow extends JFrame {
             Note.Direction dir = Note.Direction.values()[rand.nextInt(4)];
             int length = Note.minLength + rand.nextInt(Note.maxLength - Note.minLength + 1);
             double speed = 3.5 + rand.nextDouble() * 3.5; // 3.5 - 7
-            notes.add(new Note(dir, length, speed, getWidth(), getHeight()));
+            // small chance to spawn a hold (long-press) note
+            boolean isHold = rand.nextInt(8) == 0; // ~12.5% chance
+            int holdFrames = 30 + rand.nextInt(61); // 30-90 frames to hold
+            notes.add(new Note(dir, length, speed, getWidth(), getHeight(), isHold, holdFrames));
         }
 
         private void tryHit(Note.Direction dir) {
@@ -96,6 +139,7 @@ public class SimpleWindow extends JFrame {
             double bestDist = Double.MAX_VALUE;
             for (Note n : notes) {
                 if (n.dir != dir) continue;
+                if (n.isHold) continue; // hold notes must be held, not tap-hit
                 double dist = n.distanceToCenterEdge(getWidth(), getHeight());
                 if (Math.abs(dist) <= tolerance && Math.abs(dist) < Math.abs(bestDist)) {
                     best = n;
@@ -244,11 +288,17 @@ public class SimpleWindow extends JFrame {
         final int length; // visual extension away from center (unused now for facing side)
         final double speed;
         final List<Point> trail = new ArrayList<>();
+        boolean isHold;
+        int holdRequired;
+        int holdProgress;
 
-        public Note(Direction dir, int length, double speed, int panelW, int panelH) {
+        public Note(Direction dir, int length, double speed, int panelW, int panelH, boolean isHold, int holdRequired) {
             this.dir = dir;
             this.length = length;
             this.speed = speed;
+            this.isHold = isHold;
+            this.holdRequired = isHold ? holdRequired : 0;
+            this.holdProgress = 0;
             switch (dir) {
                 case LEFT:
                     x = -SPAWN_OFFSET; y = panelH / 2.0; break;
@@ -312,87 +362,193 @@ public class SimpleWindow extends JFrame {
 
             switch (dir) {
                 case LEFT:
-                    // draw as a vertical line segment centered at y (replaces rectangle)
-                    int lineLen = size;
+                    // hold notes: blue rounded rectangle that shrinks as held; otherwise vertical line
                     int xPos = (int)Math.round(x);
-                    int y1 = (int)Math.round(y - lineLen/2.0);
-                    int y2 = (int)Math.round(y + lineLen/2.0);
+                    int y1 = (int)Math.round(y - size/2.0);
+                    int y2 = (int)Math.round(y + size/2.0);
+                    Color holdBase = new Color(80, 170, 255);
+                    Color holdAccent = new Color(170, 210, 255);
                     drawTrail(g2, base);
-                    // glow layers (thick stroked lines)
-                    for (int i = 5; i >= 1; i--) {
-                        g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 20 * i));
-                        g2.setStroke(new BasicStroke(DEPTH + i*6, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                        g2.drawLine(xPos, y1, xPos, y2);
+                    if (isHold) {
+                        float p = holdRequired > 0 ? Math.min(1f, (float)holdProgress / holdRequired) : 0f;
+                        int maxLen = Math.max(16, length); // visual max length along travel axis
+                        int curLen = Math.max(8, (int)(maxLen * (1.0f - p)));
+                        // rectangle extends from leading edge (xPos) away from center
+                        int rw = curLen; // width along X
+                        int rh = Math.max(DEPTH*2, DEPTH);
+                        int rx = xPos - rw;
+                        int ry = (int)Math.round(y - rh/2.0);
+                        // glow
+                        for (int i = 5; i >= 1; i--) {
+                            g2.setColor(new Color(holdBase.getRed(), holdBase.getGreen(), holdBase.getBlue(), 18 * i));
+                            g2.fillRoundRect(rx - i*3, ry - i*3, rw + i*6, rh + i*6, 12, 12);
+                        }
+                        GradientPaint hgp = new GradientPaint(rx, ry, holdAccent, rx + rw, ry + rh, holdBase);
+                        g2.setPaint(hgp);
+                        g2.fillRoundRect(rx, ry, rw, rh, 12, 12);
+                        g2.setColor(new Color(20,30,40,200));
+                        g2.setStroke(new BasicStroke(2f));
+                        g2.drawRoundRect(rx, ry, rw, rh, 12, 12);
+                    } else {
+                        // non-hold: keep previous line look
+                        int lineLen = size;
+                        int ly1 = (int)Math.round(y - lineLen/2.0);
+                        int ly2 = (int)Math.round(y + lineLen/2.0);
+                        for (int i = 5; i >= 1; i--) {
+                            g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 20 * i));
+                            g2.setStroke(new BasicStroke(DEPTH + i*6, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                            g2.drawLine(xPos, ly1, xPos, ly2);
+                        }
+                        GradientPaint gp2 = new GradientPaint(xPos, ly1, accent, xPos, ly2, base);
+                        g2.setPaint(gp2);
+                        g2.setStroke(new BasicStroke(DEPTH, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                        g2.drawLine(xPos, ly1, xPos, ly2);
+                        g2.setColor(new Color(30,30,30,160));
+                        g2.setStroke(new BasicStroke(Math.max(2f, DEPTH / 6f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                        g2.drawLine(xPos, ly1, xPos, ly2);
                     }
-                    // main gradient stroke
-                    GradientPaint gp = new GradientPaint(xPos, y1, accent, xPos, y2, base);
-                    g2.setPaint(gp);
-                    g2.setStroke(new BasicStroke(DEPTH, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                    g2.drawLine(xPos, y1, xPos, y2);
-                    // outline
-                    g2.setColor(new Color(30,30,30,160));
-                    g2.setStroke(new BasicStroke(Math.max(2f, DEPTH / 6f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                    g2.drawLine(xPos, y1, xPos, y2);
                     break;
                 case RIGHT:
-                    // draw as a vertical line segment centered at y (replaces rectangle)
-                    lineLen = size;
+                    // hold notes: blue rounded rectangle that shrinks as held; otherwise vertical line
                     xPos = (int)Math.round(x);
-                    y1 = (int)Math.round(y - lineLen/2.0);
-                    y2 = (int)Math.round(y + lineLen/2.0);
+                    y1 = (int)Math.round(y - size/2.0);
+                    y2 = (int)Math.round(y + size/2.0);
+                    Color holdBaseR = new Color(80, 170, 255);
+                    Color holdAccentR = new Color(170, 210, 255);
                     drawTrail(g2, base);
-                    for (int i = 5; i >= 1; i--) {
-                        g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 20 * i));
-                        g2.setStroke(new BasicStroke(DEPTH + i*6, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                        g2.drawLine(xPos, y1, xPos, y2);
+                    if (isHold) {
+                        float p = holdRequired > 0 ? Math.min(1f, (float)holdProgress / holdRequired) : 0f;
+                        int maxLen = Math.max(16, length);
+                        int curLen = Math.max(8, (int)(maxLen * (1.0f - p)));
+                        int rw = curLen;
+                        int rh = Math.max(DEPTH*2, DEPTH);
+                        int rx = xPos;
+                        int ry = (int)Math.round(y - rh/2.0);
+                        for (int i = 5; i >= 1; i--) {
+                            g2.setColor(new Color(holdBaseR.getRed(), holdBaseR.getGreen(), holdBaseR.getBlue(), 18 * i));
+                            g2.fillRoundRect(rx - i*3, ry - i*3, rw + i*6, rh + i*6, 12, 12);
+                        }
+                        GradientPaint hgp = new GradientPaint(rx, ry, holdAccentR, rx + rw, ry + rh, holdBaseR);
+                        g2.setPaint(hgp);
+                        g2.fillRoundRect(rx, ry, rw, rh, 12, 12);
+                        g2.setColor(new Color(20,30,40,200));
+                        g2.setStroke(new BasicStroke(2f));
+                        g2.drawRoundRect(rx, ry, rw, rh, 12, 12);
+                    } else {
+                        int lineLen2 = size;
+                        int ly1 = (int)Math.round(y - lineLen2/2.0);
+                        int ly2 = (int)Math.round(y + lineLen2/2.0);
+                        for (int i = 5; i >= 1; i--) {
+                            g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 20 * i));
+                            g2.setStroke(new BasicStroke(DEPTH + i*6, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                            g2.drawLine(xPos, ly1, xPos, ly2);
+                        }
+                        GradientPaint gp = new GradientPaint(xPos, ly1, base, xPos, ly2, accent);
+                        g2.setPaint(gp);
+                        g2.setStroke(new BasicStroke(DEPTH, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                        g2.drawLine(xPos, ly1, xPos, ly2);
+                        g2.setColor(new Color(30,30,30,160));
+                        g2.setStroke(new BasicStroke(Math.max(2f, DEPTH / 6f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                        g2.drawLine(xPos, ly1, xPos, ly2);
                     }
-                    gp = new GradientPaint(xPos, y1, base, xPos, y2, accent);
-                    g2.setPaint(gp);
-                    g2.setStroke(new BasicStroke(DEPTH, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                    g2.drawLine(xPos, y1, xPos, y2);
-                    g2.setColor(new Color(30,30,30,160));
-                    g2.setStroke(new BasicStroke(Math.max(2f, DEPTH / 6f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                    g2.drawLine(xPos, y1, xPos, y2);
                     break;
                 case UP:
-                    // draw as a horizontal line segment centered at x (replaces rectangle)
-                    int hLineLen = size;
+                    // hold notes: blue rounded rectangle that shrinks as held; otherwise horizontal line
                     int yPos = (int)Math.round(y);
-                    int x1 = (int)Math.round(x - hLineLen/2.0);
-                    int x2 = (int)Math.round(x + hLineLen/2.0);
+                    int x1 = (int)Math.round(x - size/2.0);
+                    int x2 = (int)Math.round(x + size/2.0);
+                    Color holdBaseU = new Color(80, 170, 255);
+                    Color holdAccentU = new Color(170, 210, 255);
                     drawTrail(g2, base);
-                    for (int i = 5; i >= 1; i--) {
-                        g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 18 * i));
-                        g2.setStroke(new BasicStroke(DEPTH + i*6, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                        g2.drawLine(x1, yPos, x2, yPos);
+                    if (isHold) {
+                        float p = holdRequired > 0 ? Math.min(1f, (float)holdProgress / holdRequired) : 0f;
+                        int maxLen = Math.max(16, length);
+                        int curLen = Math.max(8, (int)(maxLen * (1.0f - p)));
+                        int rw = Math.max(DEPTH*2, DEPTH);
+                        int rh = curLen;
+                        int rx = (int)Math.round(x - rw/2.0);
+                        int ry = yPos - rh;
+                        for (int i = 5; i >= 1; i--) {
+                            g2.setColor(new Color(holdBaseU.getRed(), holdBaseU.getGreen(), holdBaseU.getBlue(), 18 * i));
+                            g2.fillRoundRect(rx - i*3, ry - i*3, rw + i*6, rh + i*6, 12, 12);
+                        }
+                        GradientPaint hgp = new GradientPaint(rx, ry, holdAccentU, rx + rw, ry + rh, holdBaseU);
+                        g2.setPaint(hgp);
+                        g2.fillRoundRect(rx, ry, rw, rh, 12, 12);
+                        g2.setColor(new Color(20,30,40,200));
+                        g2.setStroke(new BasicStroke(2f));
+                        g2.drawRoundRect(rx, ry, rw, rh, 12, 12);
+                    } else {
+                        int hLineLen2 = size;
+                        int xx1 = (int)Math.round(x - hLineLen2/2.0);
+                        int xx2 = (int)Math.round(x + hLineLen2/2.0);
+                        for (int i = 5; i >= 1; i--) {
+                            g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 18 * i));
+                            g2.setStroke(new BasicStroke(DEPTH + i*6, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                            g2.drawLine(xx1, yPos, xx2, yPos);
+                        }
+                        GradientPaint gp = new GradientPaint(xx1, yPos, accent, xx2, yPos, base);
+                        g2.setPaint(gp);
+                        g2.setStroke(new BasicStroke(DEPTH, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                        g2.drawLine(xx1, yPos, xx2, yPos);
+                        g2.setColor(new Color(30,30,30,160));
+                        g2.setStroke(new BasicStroke(Math.max(2f, DEPTH / 6f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                        g2.drawLine(xx1, yPos, xx2, yPos);
                     }
-                    gp = new GradientPaint(x1, yPos, accent, x2, yPos, base);
-                    g2.setPaint(gp);
-                    g2.setStroke(new BasicStroke(DEPTH, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                    g2.drawLine(x1, yPos, x2, yPos);
-                    g2.setColor(new Color(30,30,30,160));
-                    g2.setStroke(new BasicStroke(Math.max(2f, DEPTH / 6f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                    g2.drawLine(x1, yPos, x2, yPos);
+                    // hold progress overlay
+                    if (isHold) {
+                        float p = holdRequired > 0 ? Math.min(1f, (float)holdProgress / holdRequired) : 0f;
+                        if (p > 0f) {
+                            g2.setColor(accent);
+                            g2.setStroke(new BasicStroke(Math.max(6f, DEPTH/2f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                            int prog = (int)((x2 - x1) * p);
+                            g2.drawLine(x1, yPos, x1 + prog, yPos);
+                        }
+                    }
                     break;
                 default: // DOWN
-                    // draw as a horizontal line segment centered at x (replaces rectangle)
-                    int hLen = size;
+                    // hold notes: blue rounded rectangle that shrinks as held; otherwise horizontal line
                     int yP = (int)Math.round(y);
-                    int xStart = (int)Math.round(x - hLen/2.0);
-                    int xEnd = (int)Math.round(x + hLen/2.0);
+                    int xStart = (int)Math.round(x - size/2.0);
+                    int xEnd = (int)Math.round(x + size/2.0);
+                    Color holdBaseD = new Color(80, 170, 255);
+                    Color holdAccentD = new Color(170, 210, 255);
                     drawTrail(g2, base);
-                    for (int i = 5; i >= 1; i--) {
-                        g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 18 * i));
-                        g2.setStroke(new BasicStroke(DEPTH + i*6, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                        g2.drawLine(xStart, yP, xEnd, yP);
+                    if (isHold) {
+                        float p = holdRequired > 0 ? Math.min(1f, (float)holdProgress / holdRequired) : 0f;
+                        int maxLen = Math.max(16, length);
+                        int curLen = Math.max(8, (int)(maxLen * (1.0f - p)));
+                        int rw = Math.max(DEPTH*2, DEPTH);
+                        int rh = curLen;
+                        int rx = (int)Math.round(x - rw/2.0);
+                        int ry = yP;
+                        for (int i = 5; i >= 1; i--) {
+                            g2.setColor(new Color(holdBaseD.getRed(), holdBaseD.getGreen(), holdBaseD.getBlue(), 18 * i));
+                            g2.fillRoundRect(rx - i*3, ry - i*3, rw + i*6, rh + i*6, 12, 12);
+                        }
+                        GradientPaint hgp = new GradientPaint(rx, ry, holdAccentD, rx + rw, ry + rh, holdBaseD);
+                        g2.setPaint(hgp);
+                        g2.fillRoundRect(rx, ry, rw, rh, 12, 12);
+                        g2.setColor(new Color(20,30,40,200));
+                        g2.setStroke(new BasicStroke(2f));
+                        g2.drawRoundRect(rx, ry, rw, rh, 12, 12);
+                    } else {
+                        int hLen2 = size;
+                        int xxStart = (int)Math.round(x - hLen2/2.0);
+                        int xxEnd = (int)Math.round(x + hLen2/2.0);
+                        for (int i = 5; i >= 1; i--) {
+                            g2.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), 18 * i));
+                            g2.setStroke(new BasicStroke(DEPTH + i*6, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                            g2.drawLine(xxStart, yP, xxEnd, yP);
+                        }
+                        GradientPaint gp = new GradientPaint(xxStart, yP, accent, xxEnd, yP, base);
+                        g2.setPaint(gp);
+                        g2.setStroke(new BasicStroke(DEPTH, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                        g2.drawLine(xxStart, yP, xxEnd, yP);
+                        g2.setColor(new Color(30,30,30,160));
+                        g2.setStroke(new BasicStroke(Math.max(2f, DEPTH / 6f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                        g2.drawLine(xxStart, yP, xxEnd, yP);
                     }
-                    gp = new GradientPaint(xStart, yP, accent, xEnd, yP, base);
-                    g2.setPaint(gp);
-                    g2.setStroke(new BasicStroke(DEPTH, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                    g2.drawLine(xStart, yP, xEnd, yP);
-                    g2.setColor(new Color(30,30,30,160));
-                    g2.setStroke(new BasicStroke(Math.max(2f, DEPTH / 6f), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-                    g2.drawLine(xStart, yP, xEnd, yP);
                     break;
             }
         }
