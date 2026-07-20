@@ -328,6 +328,24 @@ public class SimpleWindow extends JFrame {
                 }
             }
             notes.add(new Note(s.dir, s.length, speedPerFrame, panelW, panelH, s.isHold, s.holdRequired, spawnOverride, s.isTouch));
+            if (s.isTouch) {
+                Note n = notes.get(notes.size()-1);
+                int w = panelW, h = panelH;
+                int sizeC = Math.min(w,h)/4;
+                int ccx = (w - sizeC)/2, ccy = (h - sizeC)/2;
+                int tx, ty; int attempts = 0;
+                do {
+                    tx = 30 + rand.nextInt(Math.max(10, w-60));
+                    ty = 30 + rand.nextInt(Math.max(10, h-60));
+                    attempts++;
+                    boolean bad = (tx >= ccx && tx <= ccx+sizeC && ty >= ccy && ty <= ccy+sizeC);
+                    for (Note m : notes) if (m != n && m.isTouch) {
+                        double dx = m.x - tx, dy = m.y - ty; if (dx*dx + dy*dy < (m.touchRadius + n.touchRadius + 10)*(m.touchRadius + n.touchRadius + 10)) bad = true;
+                    }
+                    if (!bad) break;
+                } while (attempts < 80);
+                n.x = tx; n.y = ty; n.speed = 0; n.trail.clear(); n.trail.add(new Point(tx, ty)); n.createTime = System.currentTimeMillis();
+            }
         }
 
         private void loadMidi(String path) {
