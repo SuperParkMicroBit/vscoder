@@ -826,28 +826,48 @@ public class SimpleWindow extends JFrame {
             Color base = new Color(255, 140, 60);
             Color accent = new Color(255, 220, 120);
 
-                    // Touch notes: draw independently of direction, static circular targets (DanceMania style)
+                    // Touch notes: DanceManiaX DX style static target (animated pulse)
                     if (isTouch) {
                         int tx = (int)Math.round(x);
                         int ty = (int)Math.round(y);
-                        // outer pulsing ring
-                        for (int i = 5; i >= 1; i--) {
-                            int alpha = 28 * i;
-                            int r = touchRadius + i * 8;
-                            g2.setColor(new Color(255, 120, 200, Math.min(200, alpha)));
+                        long now = System.currentTimeMillis();
+                        double elapsed = (now - createTime) / 1000.0; // seconds
+                        double pulse = 0.6 + 0.4 * Math.sin(elapsed * Math.PI * 2.0); // -0.4..1.0 -> scale
+                        int rCore = (int)(touchRadius * (0.85 + 0.25 * (1.0 + Math.sin(elapsed * Math.PI * 2.0))));
+
+                        // animated outer rings
+                        for (int i = 3; i >= 1; i--) {
+                            int r = rCore + i * 14 + (int)(6 * Math.abs(Math.sin(elapsed * Math.PI * 2.0)));
+                            int alpha = (int)(100 * (1.0 - i * 0.22));
+                            g2.setColor(new Color(255, 110, 200, Math.max(20, Math.min(180, alpha))));
                             g2.fillOval(tx - r/2, ty - r/2, r, r);
                         }
-                        // central circle with gradient
-                        GradientPaint gpTouch = new GradientPaint(tx-12, ty-12, new Color(255,200,230), tx+12, ty+12, new Color(255,120,180));
-                        g2.setPaint(gpTouch);
-                        g2.fillOval(tx-16, ty-16, 32, 32);
-                        // inner border
-                        g2.setColor(new Color(40,30,40,220));
-                        g2.setStroke(new BasicStroke(3f));
-                        g2.drawOval(tx-16, ty-16, 32, 32);
-                        // small sparkle
+
+                        // central glossy circle
+                        for (int k = 0; k < 4; k++) {
+                            int sz = rCore - k * 4;
+                            int a = 200 - k * 40;
+                            if (sz <= 6) break;
+                            g2.setColor(new Color(255, 200 - k*10, 230 - k*10, Math.max(40, a)));
+                            g2.fillOval(tx - sz/2, ty - sz/2, sz, sz);
+                        }
+
+                        // bright rim
                         g2.setColor(new Color(255,255,255,200));
-                        g2.fillOval(tx+6, ty-8, 6, 6);
+                        g2.setStroke(new BasicStroke(2f));
+                        g2.drawOval(tx - rCore/2, ty - rCore/2, rCore, rCore);
+
+                        // rotated diamond highlight to mimic DX shine
+                        int s = rCore / 2;
+                        int[] px = {tx, tx + s, tx, tx - s};
+                        int[] py = {ty - s, ty, ty + s, ty};
+                        g2.setColor(new Color(255,255,255,(int)(160 * (0.5 + 0.5*pulse))));
+                        g2.fillPolygon(px, py, 4);
+
+                        // small sparkle
+                        g2.setColor(new Color(255,255,255,220));
+                        g2.fillOval(tx + rCore/4, ty - rCore/3, Math.max(4, rCore/6), Math.max(4, rCore/6));
+
                         return;
                     }
 
