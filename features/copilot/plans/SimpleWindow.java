@@ -325,7 +325,9 @@ public class SimpleWindow extends JFrame {
 
                 // pair note-on and note-off to get durations
                 java.util.Map<Integer, Long> active = new java.util.HashMap<>();
-                List<ScheduledNote> temp = new ArrayList<>();
+                // collect raw scheduled notes with pitch info
+                class RawNote { long timeMs; int pitch; boolean isHold; int holdFrames; int len; long startTick; }
+                List<RawNote> raw = new ArrayList<>();
                 for (Ev e : events) {
                     if (!(e.msg instanceof ShortMessage)) continue;
                     ShortMessage sm = (ShortMessage) e.msg;
@@ -333,52 +335,103 @@ public class SimpleWindow extends JFrame {
                     int pitch = sm.getData1();
                     int vel = sm.getData2();
                     if (cmd == ShortMessage.NOTE_ON && vel > 0) {
-                        // start
                         active.put(pitch, e.tick);
                     } else if ((cmd == ShortMessage.NOTE_OFF) || (cmd == ShortMessage.NOTE_ON && vel == 0)) {
                         if (active.containsKey(pitch)) {
                             long startTick = active.remove(pitch);
                             long endTick = e.tick;
-                            // quantize start to 16th note
                             long quant = Math.max(1, resolution / 4);
                             long qStart = Math.round((double)startTick / quant) * quant;
-                            // convert ticks->ms for start and end
                             final long startMs = ticksToMs(qStart, tempos, resolution);
                             final long endMs = ticksToMs(endTick, tempos, resolution);
                             long durMs = Math.max(0, endMs - startMs);
-                            boolean isHold = durMs >= 300; // holds >=300ms
+                            boolean isHold = durMs >= 300;
                             int holdFrames = Math.max(8, (int)(durMs / 16));
-                            int len = Note.minLength;
-                            int lane = (pitch % 4 + 4) % 4;
-                            Note.Direction dir = Note.Direction.values()[lane];
-                            temp.add(new ScheduledNote(startMs, dir, len, isHold, holdFrames));
+                            RawNote rn = new RawNote();
+                            rn.timeMs = startMs;
+                            rn.pitch = pitch;
+                            rn.isHold = isHold;
+                            rn.holdFrames = holdFrames;
+                            rn.len = Note.minLength;
+                            rn.startTick = qStart;
+                            raw.add(rn);
                         }
                     }
                 }
 
-                // sort and filter to make game-like patterns: remove very-close duplicates per lane
-                Collections.sort(temp, new Comparator<ScheduledNote>() { public int compare(ScheduledNote a, ScheduledNote b) { return Long.compare(a.timeMs, b.timeMs); } });
+                // group by quantized start (simultaneous notes), and distribute to lanes more musically
+                Collections.sort(raw, new Comparator<RawNote>() { public int compare(RawNote a, RawNote b) { int c = Long.compare(a.timeMs, b.timeMs); if (c != 0) return c; return Integer.compare(a.pitch, b.pitch); } });
+
+                // compute global pitch range for mapping
+                int pmin = Integer.MAX_VALUE, pmax = Integer.MIN_VALUE;
+                for (RawNote r : raw) { pmin = Math.min(pmin, r.pitch); pmax = Math.max(pmax, r.pitch); }
+                if (pmin == Integer.MAX_VALUE) pmin = 60; if (pmax == Integer.MIN_VALUE) pmax = 72;
+
                 long[] lastTime = new long[4];
                 for (int i = 0; i < 4; i++) lastTime[i] = Long.MIN_VALUE/2;
                 long minGap = 160; // ms minimal gap between notes in same lane
-                for (ScheduledNote s : temp) {
-                    int idx = s.dir.ordinal();
-                    if (s.timeMs - lastTime[idx] < minGap) {
-                        // if new is hold and previous was not, replace previous
-                        if (s.isHold) {
-                            // find and replace last scheduled for this lane
-                            for (int j = scheduled.size()-1; j >=0; j--) {
-                                if (scheduled.get(j).dir.ordinal() == idx) {
-                                    scheduled.set(j, s);
-                                    lastTime[idx] = s.timeMs;
-                                    break;
+                int maxPerBeat = 2; // cap density per lane per beat
+
+                int i = 0;
+                while (i < raw.size()) {
+                    long t = raw.get(i).timeMs;
+                    // collect group of simultaneous notes (within 1ms after quantization)
+                    List<RawNote> group = new ArrayList<>();
+                    while (i < raw.size() && raw.get(i).timeMs == t) { group.add(raw.get(i)); i++; }
+
+                    if (group.size() == 1) {
+                        RawNote r = group.get(0);
+                        // map pitch to lane by relative pitch within range
+                        double rel = (double)(r.pitch - pmin) / Math.max(1, (pmax - pmin));
+                        int lane = (int)Math.floor(rel * 4.0);
+                        if (lane < 0) lane = 0; if (lane > 3) lane = 3;
+                        Note.Direction dir = Note.Direction.values()[lane];
+
+                        // check minGap and try to shift to nearby free lane if crowded
+                        if (r.timeMs - lastTime[lane] < minGap) {
+                            boolean placed = false;
+                            // try other lanes preferring same pitch direction (up/down bias)
+                            for (int off = 1; off < 4 && !placed; off++) {
+                                int l1 = lane - off; if (l1 >= 0 && r.timeMs - lastTime[l1] >= minGap) { lane = l1; placed = true; }
+                                int l2 = lane + off; if (!placed && l2 < 4 && r.timeMs - lastTime[l2] >= minGap) { lane = l2; placed = true; }
+                            }
+                            if (!placed) {
+                                // if it's a hold try to replace previous short note
+                                if (r.isHold) {
+                                    for (int j = scheduled.size()-1; j >=0; j--) {
+                                        if (scheduled.get(j).timeMs == r.timeMs && !scheduled.get(j).isHold) {
+                                            scheduled.set(j, new ScheduledNote(r.timeMs, Note.Direction.values()[lane], r.len, r.isHold, r.holdFrames));
+                                            lastTime[lane] = r.timeMs; continue;
+                                        }
+                                    }
                                 }
+                                // skip if completely crowded
+                                continue;
                             }
                         }
-                        // otherwise skip crowded note
+
+                        scheduled.add(new ScheduledNote(r.timeMs, Note.Direction.values()[lane], r.len, r.isHold, r.holdFrames));
+                        lastTime[lane] = r.timeMs;
+
                     } else {
-                        scheduled.add(s);
-                        lastTime[idx] = s.timeMs;
+                        // chord or simultaneous notes: sort by pitch and distribute across lanes
+                        Collections.sort(group, new Comparator<RawNote>() { public int compare(RawNote a, RawNote b) { return Integer.compare(a.pitch, b.pitch); } });
+                        int assigned = 0;
+                        for (RawNote r : group) {
+                            int lane = assigned % 4;
+                            // try to find a lane that satisfies minGap
+                            boolean placed = false;
+                            for (int shift = 0; shift < 4 && !placed; shift++) {
+                                int l = (lane + shift) % 4;
+                                if (r.timeMs - lastTime[l] >= minGap) {
+                                    scheduled.add(new ScheduledNote(r.timeMs, Note.Direction.values()[l], r.len, r.isHold, r.holdFrames));
+                                    lastTime[l] = r.timeMs;
+                                    placed = true;
+                                }
+                            }
+                            assigned++;
+                            // if can't place, skip this note
+                        }
                     }
                 }
 
@@ -388,6 +441,20 @@ public class SimpleWindow extends JFrame {
                     if (sequencer != null) {
                         sequencer.open();
                         sequencer.setSequence(seq);
+                        // attempt to open a Synthesizer and route sequencer to it so audio plays even without system synth
+                        try {
+                            Synthesizer synth = MidiSystem.getSynthesizer();
+                            if (synth != null) {
+                                synth.open();
+                                try {
+                                    sequencer.getTransmitter().setReceiver(synth.getReceiver());
+                                } catch (Exception exx) {
+                                    // some sequencers may not support transmitter/receiver routing; ignore
+                                }
+                            }
+                        } catch (Exception ex3) {
+                            // ignore if synthesizer unavailable
+                        }
                         sequencer.start();
                         songStartTime = System.currentTimeMillis();
                     }
