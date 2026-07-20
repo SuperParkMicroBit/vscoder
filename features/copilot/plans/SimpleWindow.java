@@ -39,9 +39,11 @@ public class SimpleWindow extends JFrame {
         private float comboPulse = 0f; // used for simple pulse animation on combo
         private int hitFlash = 0; // frames to flash center on hit
         private final boolean[] holding = new boolean[Note.Direction.values().length];
+            // mouse state for touch notes
+            private int mouseX = -1, mouseY = -1;
         private long songStartTime = -1;
         private Sequencer sequencer = null;
-        private final int leadMs = 1200; // how early to spawn notes before hit time
+        private final int leadMs = 700; // how early to spawn notes before hit time (reduced -> faster notes)
 
         public GamePanel() {
             timer = new Timer(16, (ActionEvent e) -> gameLoop());
@@ -65,12 +67,21 @@ public class SimpleWindow extends JFrame {
             getActionMap().put("pressDown", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { handlePress(Note.Direction.DOWN); }});
             getActionMap().put("releaseDown", new AbstractAction() { @Override public void actionPerformed(ActionEvent e) { holding[Note.Direction.DOWN.ordinal()] = false; }});
 
-            // load song MIDI if present
-            loadMidi("..\\..\\52925.mid");
-            songStartTime = System.currentTimeMillis();
+            // mouse listener for touch notes (clicking)
+                        addMouseListener(new java.awt.event.MouseAdapter() {
+                            @Override public void mousePressed(java.awt.event.MouseEvent e) {
+                                mouseX = e.getX(); mouseY = e.getY();
+                                handleMouseClick(mouseX, mouseY);
+                            }
+                            @Override public void mouseReleased(java.awt.event.MouseEvent e) { mouseX = -1; mouseY = -1; }
+                        });
 
-            // spawn initial notes (only when no scheduled song)
-            if (scheduled.isEmpty()) for (int i = 0; i < 4; i++) spawnRandomNote();
+                        // load song MIDI if present
+                        loadMidi("..\\..\\52925.mid");
+                        songStartTime = System.currentTimeMillis();
+
+                        // spawn initial notes (only when no scheduled song)
+                        if (scheduled.isEmpty()) for (int i = 0; i < 4; i++) spawnRandomNote();
         }
 
         private void gameLoop() {
@@ -118,18 +129,29 @@ public class SimpleWindow extends JFrame {
                     }
                 }
 
-                // After movement/hold handling, check pass/miss
-                if (n.hasPassedCenter(getWidth(), getHeight(), passLimit)) {
-                    it.remove();
-                    combo = 0; // reset combo on miss
-                    feedback = "Miss";
-                    continue;
-                }
+                // touch notes expire after a timeout
+                    if (n.isTouch) {
+                        long nowMs = System.currentTimeMillis();
+                        if (nowMs - n.createTime > Note.TOUCH_TIMEOUT_MS) {
+                            it.remove();
+                            combo = 0;
+                            feedback = "Miss";
+                            continue;
+                        }
+                    }
 
-                // also remove if completely out of screen bounds
-                if (n.isOutOfBounds(getWidth(), getHeight())) {
-                    it.remove();
-                }
+                    // After movement/hold handling, check pass/miss
+                    if (n.hasPassedCenter(getWidth(), getHeight(), passLimit)) {
+                        it.remove();
+                        combo = 0; // reset combo on miss
+                        feedback = "Miss";
+                        continue;
+                    }
+
+                    // also remove if completely out of screen bounds
+                    if (n.isOutOfBounds(getWidth(), getHeight())) {
+                        it.remove();
+                    }
             }
 
             // combo pulse decay
@@ -156,8 +178,10 @@ public class SimpleWindow extends JFrame {
             // small chance to spawn a hold (long-press) note
             boolean isHold = rand.nextInt(8) == 0; // ~12.5% chance
             int holdFrames = 30 + rand.nextInt(61); // 30-90 frames to hold
-            // double-check direction not being held right now before adding
-            if (holding[dir.ordinal()]) return;
+                        // small chance to spawn a touch note (requires mouse)
+                        boolean isTouch = rand.nextInt(12) == 0; // ~8.3% chance
+                        // double-check direction not being held right now before adding
+                        if (holding[dir.ordinal()]) return;
             // compute spawn offset override to avoid overlapping existing notes in same dir
             int gap = 60;
             int spawnOverride = Note.SPAWN_OFFSET;
@@ -192,7 +216,26 @@ public class SimpleWindow extends JFrame {
                     }
                 }
             }
-            notes.add(new Note(dir, length, speed, getWidth(), getHeight(), isHold, holdFrames, spawnOverride));
+            notes.add(new Note(dir, length, speed, getWidth(), getHeight(), isHold, holdFrames, spawnOverride, isTouch));
+            // if it's a touch note, pick a static screen position (avoid center and other touch notes)
+            if (isTouch) {
+                Note n = notes.get(notes.size()-1);
+                int w = getWidth(), h = getHeight();
+                int sizeC = Math.min(w,h)/4;
+                int cx = (w - sizeC)/2, cy = (h - sizeC)/2;
+                int tx, ty; int attempts = 0;
+                do {
+                    tx = 30 + rand.nextInt(Math.max(10, w-60));
+                    ty = 30 + rand.nextInt(Math.max(10, h-60));
+                    attempts++;
+                    boolean bad = (tx >= cx && tx <= cx+sizeC && ty >= cy && ty <= cy+sizeC);
+                    for (Note m : notes) if (m != n && m.isTouch) {
+                        double dx = m.x - tx, dy = m.y - ty; if (dx*dx + dy*dy < (m.touchRadius + n.touchRadius + 10)*(m.touchRadius + n.touchRadius + 10)) bad = true;
+                    }
+                    if (!bad) break;
+                } while (attempts < 80);
+                n.x = tx; n.y = ty; n.speed = 0; n.trail.clear(); n.trail.add(new Point(tx, ty)); n.createTime = System.currentTimeMillis();
+            }
         }
 
         private void tryHit(Note.Direction dir) {
@@ -202,12 +245,13 @@ public class SimpleWindow extends JFrame {
             for (Note n : notes) {
                 if (n.dir != dir) continue;
                 if (n.isHold) continue; // hold notes must be held, not tap-hit
-                double dist = n.distanceToCenterEdge(getWidth(), getHeight());
-                if (Math.abs(dist) <= tolerance && Math.abs(dist) < Math.abs(bestDist)) {
-                    best = n;
-                    bestDist = dist;
-                }
-            }
+                            if (n.isTouch) continue; // touch notes must be clicked with mouse
+                            double dist = n.distanceToCenterEdge(getWidth(), getHeight());
+                            if (Math.abs(dist) <= tolerance && Math.abs(dist) < Math.abs(bestDist)) {
+                                best = n;
+                                bestDist = dist;
+                            }
+                        }
             if (best != null) {
                 score += 100;
                 combo++;
@@ -229,7 +273,9 @@ public class SimpleWindow extends JFrame {
             int length;
             boolean isHold;
             int holdRequired;
-            ScheduledNote(long t, Note.Direction d, int len, boolean hold, int hr) { timeMs = t; dir = d; length = len; isHold = hold; holdRequired = hr; }
+            boolean isTouch;
+            ScheduledNote(long t, Note.Direction d, int len, boolean hold, int hr) { timeMs = t; dir = d; length = len; isHold = hold; holdRequired = hr; isTouch = false; }
+            ScheduledNote(long t, Note.Direction d, int len, boolean hold, int hr, boolean touch) { timeMs = t; dir = d; length = len; isHold = hold; holdRequired = hr; isTouch = touch; }
         }
 
         private void spawnScheduledNote(ScheduledNote s) {
@@ -281,7 +327,7 @@ public class SimpleWindow extends JFrame {
                     }
                 }
             }
-            notes.add(new Note(s.dir, s.length, speedPerFrame, panelW, panelH, s.isHold, s.holdRequired, spawnOverride));
+            notes.add(new Note(s.dir, s.length, speedPerFrame, panelW, panelH, s.isHold, s.holdRequired, spawnOverride, s.isTouch));
         }
 
         private void loadMidi(String path) {
@@ -340,7 +386,7 @@ public class SimpleWindow extends JFrame {
                         if (active.containsKey(pitch)) {
                             long startTick = active.remove(pitch);
                             long endTick = e.tick;
-                            long quant = Math.max(1, resolution / 4);
+                            long quant = Math.max(1, resolution / 8); // finer quantization (eighths) to add rhythmic density
                             long qStart = Math.round((double)startTick / quant) * quant;
                             final long startMs = ticksToMs(qStart, tempos, resolution);
                             final long endMs = ticksToMs(endTick, tempos, resolution);
@@ -369,8 +415,8 @@ public class SimpleWindow extends JFrame {
 
                 long[] lastTime = new long[4];
                 for (int i = 0; i < 4; i++) lastTime[i] = Long.MIN_VALUE/2;
-                long minGap = 160; // ms minimal gap between notes in same lane
-                int maxPerBeat = 2; // cap density per lane per beat
+                long minGap = 100; // ms minimal gap between notes in same lane (reduced -> denser)
+                                int maxPerBeat = 3; // allow up to 3 notes per beat per lane (increase complexity)
 
                 int i = 0;
                 while (i < raw.size()) {
@@ -400,18 +446,20 @@ public class SimpleWindow extends JFrame {
                                 if (r.isHold) {
                                     for (int j = scheduled.size()-1; j >=0; j--) {
                                         if (scheduled.get(j).timeMs == r.timeMs && !scheduled.get(j).isHold) {
-                                            scheduled.set(j, new ScheduledNote(r.timeMs, Note.Direction.values()[lane], r.len, r.isHold, r.holdFrames));
-                                            lastTime[lane] = r.timeMs; continue;
-                                        }
-                                    }
-                                }
-                                // skip if completely crowded
-                                continue;
-                            }
-                        }
+                                                                            boolean touch = (r.pitch % 12 == 0) || (rand.nextInt(20) == 0);
+                                                                            scheduled.set(j, new ScheduledNote(r.timeMs, Note.Direction.values()[lane], r.len, r.isHold, r.holdFrames, touch));
+                                                                            lastTime[lane] = r.timeMs; continue;
+                                                                        }
+                                                                    }
+                                                                }
+                                                                // skip if completely crowded
+                                                                continue;
+                                                            }
+                                                        }
 
-                        scheduled.add(new ScheduledNote(r.timeMs, Note.Direction.values()[lane], r.len, r.isHold, r.holdFrames));
-                        lastTime[lane] = r.timeMs;
+                                                        boolean touch = (r.pitch % 12 == 0) || (rand.nextInt(20) == 0);
+                                                        scheduled.add(new ScheduledNote(r.timeMs, Note.Direction.values()[lane], r.len, r.isHold, r.holdFrames, touch));
+                                                        lastTime[lane] = r.timeMs;
 
                     } else {
                         // chord or simultaneous notes: sort by pitch and distribute across lanes
@@ -424,14 +472,15 @@ public class SimpleWindow extends JFrame {
                             for (int shift = 0; shift < 4 && !placed; shift++) {
                                 int l = (lane + shift) % 4;
                                 if (r.timeMs - lastTime[l] >= minGap) {
-                                    scheduled.add(new ScheduledNote(r.timeMs, Note.Direction.values()[l], r.len, r.isHold, r.holdFrames));
-                                    lastTime[l] = r.timeMs;
-                                    placed = true;
-                                }
-                            }
-                            assigned++;
-                            // if can't place, skip this note
-                        }
+                                                            boolean touch = (r.pitch % 12 == 0) || (rand.nextInt(20) == 0);
+                                                            scheduled.add(new ScheduledNote(r.timeMs, Note.Direction.values()[l], r.len, r.isHold, r.holdFrames, touch));
+                                                            lastTime[l] = r.timeMs;
+                                                            placed = true;
+                                                        }
+                                                    }
+                                                    assigned++;
+                                                    // if can't place, skip this note
+                                                }
                     }
                 }
 
@@ -496,7 +545,7 @@ public class SimpleWindow extends JFrame {
             for (Note n : notes) {
                 if (n.dir != dir) continue;
                 double dist = n.distanceToCenterEdge(getWidth(), getHeight());
-                if (!n.isHold && Math.abs(dist) <= tolerance) {
+                if (!n.isHold && !n.isTouch && Math.abs(dist) <= tolerance) {
                     tryHit(dir);
                     return;
                 }
@@ -514,6 +563,30 @@ public class SimpleWindow extends JFrame {
             // otherwise treat as a normal tap (may be a Bad)
             tryHit(dir);
         }
+
+        // handle mouse clicks for touch notes
+        private void handleMouseClick(int mx, int my) {
+                    Note hit = null;
+                    for (Note n : notes) {
+                        if (!n.isTouch) continue;
+                        double dx = n.x - mx;
+                        double dy = n.y - my;
+                        double d2 = dx*dx + dy*dy;
+                        if (d2 <= (n.touchRadius * n.touchRadius)) { hit = n; break; }
+                    }
+                    if (hit != null) {
+                        score += 150;
+                        combo++;
+                        feedback = "Touch OK";
+                        comboPulse = 1.2f;
+                        hitFlash = 6;
+                        notes.remove(hit);
+                    } else {
+                        score = Math.max(0, score - 20);
+                        combo = 0;
+                        feedback = "Miss";
+                    }
+                }
 
         @Override
         protected void paintComponent(Graphics g) {
@@ -647,35 +720,21 @@ public class SimpleWindow extends JFrame {
         boolean isHold;
         int holdRequired;
         int holdProgress;
+        boolean isTouch;
+        int touchRadius = 24;
+        long createTime;
+        static final int TOUCH_TIMEOUT_MS = 3000; // ms before touch note times out
 
-        public Note(Direction dir, int length, double speed, int panelW, int panelH, boolean isHold, int holdRequired) {
+        // primary constructor
+        public Note(Direction dir, int length, double speed, int panelW, int panelH, boolean isHold, int holdRequired, int spawnOffsetOverride, boolean isTouch) {
             this.dir = dir;
             this.length = length;
             this.speed = speed;
             this.isHold = isHold;
             this.holdRequired = isHold ? holdRequired : 0;
             this.holdProgress = 0;
-            switch (dir) {
-                case LEFT:
-                    x = -SPAWN_OFFSET; y = panelH / 2.0; break;
-                case RIGHT:
-                    x = panelW + SPAWN_OFFSET; y = panelH / 2.0; break;
-                case UP:
-                    y = -SPAWN_OFFSET; x = panelW / 2.0; break;
-                default:
-                    y = panelH + SPAWN_OFFSET; x = panelW / 2.0; break;
-            }
-            trail.add(new Point((int)x, (int)y));
-        }
-
-        // overloaded constructor to allow custom spawn offset to avoid overlaps
-        public Note(Direction dir, int length, double speed, int panelW, int panelH, boolean isHold, int holdRequired, int spawnOffsetOverride) {
-            this.dir = dir;
-            this.length = length;
-            this.speed = speed;
-            this.isHold = isHold;
-            this.holdRequired = isHold ? holdRequired : 0;
-            this.holdProgress = 0;
+            this.isTouch = isTouch;
+            this.createTime = System.currentTimeMillis();
             switch (dir) {
                 case LEFT:
                     x = -spawnOffsetOverride; y = panelH / 2.0; break;
@@ -689,36 +748,48 @@ public class SimpleWindow extends JFrame {
             trail.add(new Point((int)x, (int)y));
         }
 
-        public void update() {
-            switch (dir) {
-                case LEFT: x += speed; break;
-                case RIGHT: x -= speed; break;
-                case UP: y += speed; break;
-                case DOWN: y -= speed; break;
-            }
-            trail.add(0, new Point((int)Math.round(x), (int)Math.round(y)));
-            if (trail.size() > 12) trail.remove(trail.size()-1);
+        // convenience constructors
+        public Note(Direction dir, int length, double speed, int panelW, int panelH, boolean isHold, int holdRequired) {
+            this(dir, length, speed, panelW, panelH, isHold, holdRequired, SPAWN_OFFSET, false);
         }
+
+        public Note(Direction dir, int length, double speed, int panelW, int panelH, boolean isHold, int holdRequired, int spawnOffsetOverride) {
+            this(dir, length, speed, panelW, panelH, isHold, holdRequired, spawnOffsetOverride, false);
+        }
+
+        public void update() {
+                    if (isTouch) return; // touch notes are static
+                    switch (dir) {
+                        case LEFT: x += speed; break;
+                        case RIGHT: x -= speed; break;
+                        case UP: y += speed; break;
+                        case DOWN: y -= speed; break;
+                    }
+                    trail.add(0, new Point((int)Math.round(x), (int)Math.round(y)));
+                    if (trail.size() > 12) trail.remove(trail.size()-1);
+                }
 
         public boolean isOutOfBounds(int panelW, int panelH) {
-            return x < -maxLength*2 || x > panelW + maxLength*2 || y < -maxLength*2 || y > panelH + maxLength*2;
-        }
+                    if (isTouch) return false; // touch notes are static and shouldn't be auto-removed by bounds
+                    return x < -maxLength*2 || x > panelW + maxLength*2 || y < -maxLength*2 || y > panelH + maxLength*2;
+                }
 
-        public boolean hasPassedCenter(int panelW, int panelH, int passLimit) {
-            int size = Math.min(panelW, panelH) / 4;
-            int cx = (panelW - size) / 2;
-            int cy = (panelH - size) / 2;
-            double d = distanceToCenterEdge(panelW, panelH);
-            switch (dir) {
-                case LEFT:
-                case UP:
-                    return d > passLimit;
-                case RIGHT:
-                case DOWN:
-                    return d < -passLimit;
-            }
-            return false;
-        }
+                public boolean hasPassedCenter(int panelW, int panelH, int passLimit) {
+                    if (isTouch) return false; // touch notes don't pass center
+                    int size = Math.min(panelW, panelH) / 4;
+                    int cx = (panelW - size) / 2;
+                    int cy = (panelH - size) / 2;
+                    double d = distanceToCenterEdge(panelW, panelH);
+                    switch (dir) {
+                        case LEFT:
+                        case UP:
+                            return d > passLimit;
+                        case RIGHT:
+                        case DOWN:
+                            return d < -passLimit;
+                    }
+                    return false;
+                }
 
         public double distanceToCenterEdge(int panelW, int panelH) {
             int size = Math.min(panelW, panelH) / 4;
@@ -737,7 +808,32 @@ public class SimpleWindow extends JFrame {
             Color base = new Color(255, 140, 60);
             Color accent = new Color(255, 220, 120);
 
-            switch (dir) {
+                    // Touch notes: draw independently of direction, static circular targets (DanceMania style)
+                    if (isTouch) {
+                        int tx = (int)Math.round(x);
+                        int ty = (int)Math.round(y);
+                        // outer pulsing ring
+                        for (int i = 5; i >= 1; i--) {
+                            int alpha = 28 * i;
+                            int r = touchRadius + i * 8;
+                            g2.setColor(new Color(255, 120, 200, Math.min(200, alpha)));
+                            g2.fillOval(tx - r/2, ty - r/2, r, r);
+                        }
+                        // central circle with gradient
+                        GradientPaint gpTouch = new GradientPaint(tx-12, ty-12, new Color(255,200,230), tx+12, ty+12, new Color(255,120,180));
+                        g2.setPaint(gpTouch);
+                        g2.fillOval(tx-16, ty-16, 32, 32);
+                        // inner border
+                        g2.setColor(new Color(40,30,40,220));
+                        g2.setStroke(new BasicStroke(3f));
+                        g2.drawOval(tx-16, ty-16, 32, 32);
+                        // small sparkle
+                        g2.setColor(new Color(255,255,255,200));
+                        g2.fillOval(tx+6, ty-8, 6, 6);
+                        return;
+                    }
+
+                    switch (dir) {
                 case LEFT:
                     // hold notes: blue rounded rectangle that shrinks as held; otherwise vertical line
                     int xPos = (int)Math.round(x);
@@ -746,7 +842,22 @@ public class SimpleWindow extends JFrame {
                     Color holdBase = new Color(80, 170, 255);
                     Color holdAccent = new Color(170, 210, 255);
                     drawTrail(g2, base);
-                    if (isHold) {
+                    if (isTouch) {
+                        int tx = (int)Math.round(x);
+                        int ty = (int)Math.round(y);
+                        Color touchBase = new Color(255, 100, 180);
+                        for (int i = 6; i >= 1; i--) {
+                            g2.setColor(new Color(touchBase.getRed(), touchBase.getGreen(), touchBase.getBlue(), 20 * i));
+                            int r = 24 + i*6;
+                            g2.fillOval(tx - r/2, ty - r/2, r, r);
+                        }
+                        GradientPaint tgp = new GradientPaint(tx-12, ty-12, new Color(255,180,220), tx+12, ty+12, touchBase);
+                        g2.setPaint(tgp);
+                        g2.fillOval(tx-12, ty-12, 24, 24);
+                        g2.setColor(new Color(30,30,30,200));
+                        g2.setStroke(new BasicStroke(3f));
+                        g2.drawOval(tx-12, ty-12, 24, 24);
+                    } else if (isHold) {
                         float p = holdRequired > 0 ? Math.min(1f, (float)holdProgress / holdRequired) : 0f;
                         int maxLen = Math.max(16, length); // visual max length along travel axis
                         int curLen = Math.max(8, (int)(maxLen * (1.0f - p)));
@@ -793,7 +904,22 @@ public class SimpleWindow extends JFrame {
                     Color holdBaseR = new Color(80, 170, 255);
                     Color holdAccentR = new Color(170, 210, 255);
                     drawTrail(g2, base);
-                    if (isHold) {
+                    if (isTouch) {
+                        int tx = (int)Math.round(x);
+                        int ty = (int)Math.round(y);
+                        Color touchBase = new Color(255, 100, 180);
+                        for (int i = 6; i >= 1; i--) {
+                            g2.setColor(new Color(touchBase.getRed(), touchBase.getGreen(), touchBase.getBlue(), 20 * i));
+                            int r = 24 + i*6;
+                            g2.fillOval(tx - r/2, ty - r/2, r, r);
+                        }
+                        GradientPaint tgp = new GradientPaint(tx-12, ty-12, new Color(255,180,220), tx+12, ty+12, touchBase);
+                        g2.setPaint(tgp);
+                        g2.fillOval(tx-12, ty-12, 24, 24);
+                        g2.setColor(new Color(30,30,30,200));
+                        g2.setStroke(new BasicStroke(3f));
+                        g2.drawOval(tx-12, ty-12, 24, 24);
+                    } else if (isHold) {
                         float p = holdRequired > 0 ? Math.min(1f, (float)holdProgress / holdRequired) : 0f;
                         int maxLen = Math.max(16, length);
                         int curLen = Math.max(8, (int)(maxLen * (1.0f - p)));
@@ -837,7 +963,22 @@ public class SimpleWindow extends JFrame {
                     Color holdBaseU = new Color(80, 170, 255);
                     Color holdAccentU = new Color(170, 210, 255);
                     drawTrail(g2, base);
-                    if (isHold) {
+                                        if (isTouch) {
+                                            int tx = (int)Math.round(x);
+                                            int ty = (int)Math.round(y);
+                                            Color touchBase = new Color(255, 100, 180);
+                                            for (int i = 6; i >= 1; i--) {
+                                                g2.setColor(new Color(touchBase.getRed(), touchBase.getGreen(), touchBase.getBlue(), 20 * i));
+                                                int r = 24 + i*6;
+                                                g2.fillOval(tx - r/2, ty - r/2, r, r);
+                                            }
+                                            GradientPaint tgp = new GradientPaint(tx-12, ty-12, new Color(255,180,220), tx+12, ty+12, touchBase);
+                                            g2.setPaint(tgp);
+                                            g2.fillOval(tx-12, ty-12, 24, 24);
+                                            g2.setColor(new Color(30,30,30,200));
+                                            g2.setStroke(new BasicStroke(3f));
+                                            g2.drawOval(tx-12, ty-12, 24, 24);
+                                        } else if (isHold) {
                         float p = holdRequired > 0 ? Math.min(1f, (float)holdProgress / holdRequired) : 0f;
                         int maxLen = Math.max(16, length);
                         int curLen = Math.max(8, (int)(maxLen * (1.0f - p)));
