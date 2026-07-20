@@ -30,7 +30,6 @@ public class SimpleWindow extends JFrame {
     private static class GamePanel extends JPanel {
         private final List<Note> notes = new ArrayList<>();
         private final List<ScheduledNote> scheduled = new ArrayList<>();
-        private final List<ScheduledNote> hitQueue = new ArrayList<>();
         private final Random rand = new Random();
         private final Timer timer;
         private int tick = 0;
@@ -42,8 +41,6 @@ public class SimpleWindow extends JFrame {
         private final boolean[] holding = new boolean[Note.Direction.values().length];
         private long songStartTime = -1;
         private Sequencer sequencer = null;
-        private SourceDataLine clickLine = null;
-        private byte[] clickBuf = null;
         private final int leadMs = 1200; // how early to spawn notes before hit time
 
         public GamePanel() {
@@ -71,7 +68,6 @@ public class SimpleWindow extends JFrame {
             // load song MIDI if present
             loadMidi("..\\..\\52925.mid");
             songStartTime = System.currentTimeMillis();
-            initClick();
 
             // spawn initial notes (only when no scheduled song)
             if (scheduled.isEmpty()) for (int i = 0; i < 4; i++) spawnRandomNote();
@@ -88,18 +84,6 @@ public class SimpleWindow extends JFrame {
                 }
             } else if (tick % 45 == 0) spawnRandomNote(); // spawn rate
 
-            // play click sounds at hit times
-            if (!hitQueue.isEmpty() && songStartTime > 0) {
-                long now = System.currentTimeMillis() - songStartTime;
-                Iterator<ScheduledNote> hitIt = hitQueue.iterator();
-                while (hitIt.hasNext()) {
-                    ScheduledNote h = hitIt.next();
-                    if (h.timeMs <= now) {
-                        playClick();
-                        hitIt.remove();
-                    } else break;
-                }
-            }
 
             Iterator<Note> it = notes.iterator();
             while (it.hasNext()) {
@@ -174,7 +158,41 @@ public class SimpleWindow extends JFrame {
             int holdFrames = 30 + rand.nextInt(61); // 30-90 frames to hold
             // double-check direction not being held right now before adding
             if (holding[dir.ordinal()]) return;
-            notes.add(new Note(dir, length, speed, getWidth(), getHeight(), isHold, holdFrames));
+            // compute spawn offset override to avoid overlapping existing notes in same dir
+            int gap = 60;
+            int spawnOverride = Note.SPAWN_OFFSET;
+            if (!notes.isEmpty()) {
+                if (dir == Note.Direction.LEFT) {
+                    double minX = Double.POSITIVE_INFINITY;
+                    for (Note n : notes) if (n.dir == dir) minX = Math.min(minX, n.x);
+                    if (minX != Double.POSITIVE_INFINITY) {
+                        double desiredX = minX - gap; // more negative
+                        spawnOverride = Math.max(spawnOverride, (int)Math.ceil(-desiredX));
+                    }
+                } else if (dir == Note.Direction.RIGHT) {
+                    double maxX = Double.NEGATIVE_INFINITY;
+                    for (Note n : notes) if (n.dir == dir) maxX = Math.max(maxX, n.x);
+                    if (maxX != Double.NEGATIVE_INFINITY) {
+                        double desiredX = maxX + gap;
+                        spawnOverride = Math.max(spawnOverride, (int)Math.ceil(desiredX - getWidth()));
+                    }
+                } else if (dir == Note.Direction.UP) {
+                    double minY = Double.POSITIVE_INFINITY;
+                    for (Note n : notes) if (n.dir == dir) minY = Math.min(minY, n.y);
+                    if (minY != Double.POSITIVE_INFINITY) {
+                        double desiredY = minY - gap;
+                        spawnOverride = Math.max(spawnOverride, (int)Math.ceil(-desiredY));
+                    }
+                } else { // DOWN
+                    double maxY = Double.NEGATIVE_INFINITY;
+                    for (Note n : notes) if (n.dir == dir) maxY = Math.max(maxY, n.y);
+                    if (maxY != Double.NEGATIVE_INFINITY) {
+                        double desiredY = maxY + gap;
+                        spawnOverride = Math.max(spawnOverride, (int)Math.ceil(desiredY - getHeight()));
+                    }
+                }
+            }
+            notes.add(new Note(dir, length, speed, getWidth(), getHeight(), isHold, holdFrames, spawnOverride));
         }
 
         private void tryHit(Note.Direction dir) {
@@ -229,9 +247,41 @@ public class SimpleWindow extends JFrame {
             }
             double speedPerMs = distance / Math.max(1, leadMs);
             double speedPerFrame = speedPerMs * 16.0; // since timer is ~16ms
-            notes.add(new Note(s.dir, s.length, speedPerFrame, panelW, panelH, s.isHold, s.holdRequired));
-            // add to hitQueue so click plays at hit time
-            hitQueue.add(s);
+            // compute spawnOverride similar to random spawn to avoid overlaps
+            int gap = 60;
+            int spawnOverride = Note.SPAWN_OFFSET;
+            if (!notes.isEmpty()) {
+                if (s.dir == Note.Direction.LEFT) {
+                    double minX = Double.POSITIVE_INFINITY;
+                    for (Note n : notes) if (n.dir == s.dir) minX = Math.min(minX, n.x);
+                    if (minX != Double.POSITIVE_INFINITY) {
+                        double desiredX = minX - gap;
+                        spawnOverride = Math.max(spawnOverride, (int)Math.ceil(-desiredX));
+                    }
+                } else if (s.dir == Note.Direction.RIGHT) {
+                    double maxX = Double.NEGATIVE_INFINITY;
+                    for (Note n : notes) if (n.dir == s.dir) maxX = Math.max(maxX, n.x);
+                    if (maxX != Double.NEGATIVE_INFINITY) {
+                        double desiredX = maxX + gap;
+                        spawnOverride = Math.max(spawnOverride, (int)Math.ceil(desiredX - panelW));
+                    }
+                } else if (s.dir == Note.Direction.UP) {
+                    double minY = Double.POSITIVE_INFINITY;
+                    for (Note n : notes) if (n.dir == s.dir) minY = Math.min(minY, n.y);
+                    if (minY != Double.POSITIVE_INFINITY) {
+                        double desiredY = minY - gap;
+                        spawnOverride = Math.max(spawnOverride, (int)Math.ceil(-desiredY));
+                    }
+                } else {
+                    double maxY = Double.NEGATIVE_INFINITY;
+                    for (Note n : notes) if (n.dir == s.dir) maxY = Math.max(maxY, n.y);
+                    if (maxY != Double.NEGATIVE_INFINITY) {
+                        double desiredY = maxY + gap;
+                        spawnOverride = Math.max(spawnOverride, (int)Math.ceil(desiredY - panelH));
+                    }
+                }
+            }
+            notes.add(new Note(s.dir, s.length, speedPerFrame, panelW, panelH, s.isHold, s.holdRequired, spawnOverride));
         }
 
         private void loadMidi(String path) {
@@ -240,8 +290,8 @@ public class SimpleWindow extends JFrame {
                 if (!f.exists()) return;
                 Sequence seq = MidiSystem.getSequence(f);
                 int resolution = seq.getResolution();
+
                 // collect tempo changes
-                class Tempo { long tick; int mpq; Tempo(long t, int m) { tick = t; mpq = m; } }
                 List<Tempo> tempos = new ArrayList<>();
                 tempos.add(new Tempo(0, 500000));
                 Track[] tracks = seq.getTracks();
@@ -261,52 +311,80 @@ public class SimpleWindow extends JFrame {
                 }
                 Collections.sort(tempos, new Comparator<Tempo>() { public int compare(Tempo a, Tempo b) { return Long.compare(a.tick, b.tick); } });
 
-                // collect note-on events
-                class NEvent { long tick; int pitch; NEvent(long t, int p) { tick = t; pitch = p; } }
-                List<NEvent> nevents = new ArrayList<>();
+                // merge all events across tracks so ordering is global
+                class Ev { long tick; MidiMessage msg; }
+                List<Ev> events = new ArrayList<>();
                 for (Track t : tracks) {
                     for (int i = 0; i < t.size(); i++) {
                         MidiEvent ev = t.get(i);
-                        MidiMessage msg = ev.getMessage();
-                        if (msg instanceof ShortMessage) {
-                            ShortMessage sm = (ShortMessage) msg;
-                            if (sm.getCommand() == ShortMessage.NOTE_ON && sm.getData2() > 0) {
-                                nevents.add(new NEvent(ev.getTick(), sm.getData1()));
-                            }
+                        Ev e = new Ev(); e.tick = ev.getTick(); e.msg = ev.getMessage();
+                        events.add(e);
+                    }
+                }
+                Collections.sort(events, new Comparator<Ev>() { public int compare(Ev a, Ev b) { return Long.compare(a.tick, b.tick); } });
+
+                // pair note-on and note-off to get durations
+                java.util.Map<Integer, Long> active = new java.util.HashMap<>();
+                List<ScheduledNote> temp = new ArrayList<>();
+                for (Ev e : events) {
+                    if (!(e.msg instanceof ShortMessage)) continue;
+                    ShortMessage sm = (ShortMessage) e.msg;
+                    int cmd = sm.getCommand();
+                    int pitch = sm.getData1();
+                    int vel = sm.getData2();
+                    if (cmd == ShortMessage.NOTE_ON && vel > 0) {
+                        // start
+                        active.put(pitch, e.tick);
+                    } else if ((cmd == ShortMessage.NOTE_OFF) || (cmd == ShortMessage.NOTE_ON && vel == 0)) {
+                        if (active.containsKey(pitch)) {
+                            long startTick = active.remove(pitch);
+                            long endTick = e.tick;
+                            // quantize start to 16th note
+                            long quant = Math.max(1, resolution / 4);
+                            long qStart = Math.round((double)startTick / quant) * quant;
+                            // convert ticks->ms for start and end
+                            final long startMs = ticksToMs(qStart, tempos, resolution);
+                            final long endMs = ticksToMs(endTick, tempos, resolution);
+                            long durMs = Math.max(0, endMs - startMs);
+                            boolean isHold = durMs >= 300; // holds >=300ms
+                            int holdFrames = Math.max(8, (int)(durMs / 16));
+                            int len = Note.minLength;
+                            int lane = (pitch % 4 + 4) % 4;
+                            Note.Direction dir = Note.Direction.values()[lane];
+                            temp.add(new ScheduledNote(startMs, dir, len, isHold, holdFrames));
                         }
                     }
                 }
 
-                // convert ticks to ms and schedule
-                for (NEvent ne : nevents) {
-                    long tick = ne.tick;
-                    long prevTick = 0;
-                    long us = 0;
-                    int currentMpq = 500000;
-                    for (Tempo tt : tempos) {
-                        if (tick <= tt.tick) break;
-                        long dt = Math.min(tick, tt.tick) - prevTick;
-                        us += (dt * (long)currentMpq) / resolution;
-                        prevTick = tt.tick;
-                        currentMpq = tt.mpq;
+                // sort and filter to make game-like patterns: remove very-close duplicates per lane
+                Collections.sort(temp, new Comparator<ScheduledNote>() { public int compare(ScheduledNote a, ScheduledNote b) { return Long.compare(a.timeMs, b.timeMs); } });
+                long[] lastTime = new long[4];
+                for (int i = 0; i < 4; i++) lastTime[i] = Long.MIN_VALUE/2;
+                long minGap = 160; // ms minimal gap between notes in same lane
+                for (ScheduledNote s : temp) {
+                    int idx = s.dir.ordinal();
+                    if (s.timeMs - lastTime[idx] < minGap) {
+                        // if new is hold and previous was not, replace previous
+                        if (s.isHold) {
+                            // find and replace last scheduled for this lane
+                            for (int j = scheduled.size()-1; j >=0; j--) {
+                                if (scheduled.get(j).dir.ordinal() == idx) {
+                                    scheduled.set(j, s);
+                                    lastTime[idx] = s.timeMs;
+                                    break;
+                                }
+                            }
+                        }
+                        // otherwise skip crowded note
+                    } else {
+                        scheduled.add(s);
+                        lastTime[idx] = s.timeMs;
                     }
-                    if (prevTick < tick) {
-                        long dt = tick - prevTick;
-                        us += (dt * (long)currentMpq) / resolution;
-                    }
-                    long ms = us / 1000;
-                    // map pitch to direction
-                    int p = ne.pitch % 4; if (p < 0) p += 4;
-                    Note.Direction dir = Note.Direction.values()[p % 4];
-                    int len = Note.minLength;
-                    scheduled.add(new ScheduledNote(ms, dir, len, false, 0));
                 }
-                // sort scheduled
-                Collections.sort(scheduled, new Comparator<ScheduledNote>() { public int compare(ScheduledNote a, ScheduledNote b) { return Long.compare(a.timeMs, b.timeMs); } });
 
-                // start playback using Sequencer so music plays
+                // start sequencer for timing (audio may be silent without synth)
                 try {
-                    sequencer = MidiSystem.getSequencer();
+                    sequencer = MidiSystem.getSequencer(false);
                     if (sequencer != null) {
                         sequencer.open();
                         sequencer.setSequence(seq);
@@ -317,29 +395,30 @@ public class SimpleWindow extends JFrame {
                     ex2.printStackTrace();
                 }
 
-                // build a simple click buffer for fallback audio
-                try {
-                    int sampleRate = 44100;
-                    int durationMs = 60;
-                    int len = (sampleRate * durationMs) / 1000;
-                    byte[] buf = new byte[len * 2]; // 16-bit
-                    double freq = 1000.0;
-                    for (int i = 0; i < len; i++) {
-                        double t = i / (double)sampleRate;
-                        // short click: sine with exponential decay
-                        double env = Math.exp(-8.0 * t);
-                        short s = (short)(Math.sin(2*Math.PI*freq*t) * 32767 * env * 0.6);
-                        buf[2*i] = (byte)(s & 0xFF);
-                        buf[2*i+1] = (byte)((s >> 8) & 0xFF);
-                    }
-                    clickBuf = buf;
-                } catch (Exception ex3) {
-                    ex3.printStackTrace();
-                }
-
             } catch (Exception ex) {
                 ex.printStackTrace();
             }
+        }
+
+        // helper: convert ticks to ms using tempo map
+        private static class Tempo { long tick; int mpq; Tempo(long t, int m) { tick = t; mpq = m; } }
+
+        private long ticksToMs(long tick, List<Tempo> tempos, int resolution) {
+            long prevTick = 0;
+            long us = 0;
+            int currentMpq = 500000;
+            for (Tempo tt : tempos) {
+                if (tick <= tt.tick) break;
+                long dt = Math.min(tick, tt.tick) - prevTick;
+                us += (dt * (long)currentMpq) / resolution;
+                prevTick = tt.tick;
+                currentMpq = tt.mpq;
+            }
+            if (prevTick < tick) {
+                long dt = tick - prevTick;
+                us += (dt * (long)currentMpq) / resolution;
+            }
+            return us / 1000;
         }
 
         // handles press with hold detection: if a hold note is within window start holding instead of penalizing
@@ -469,47 +548,19 @@ public class SimpleWindow extends JFrame {
                 // draw direction hints
                 g2.setFont(new Font("SansSerif", Font.PLAIN, 22));
                 FontMetrics hintFm = g2.getFontMetrics();
-                int hintW = hintFm.stringWidth("←");
+                int hintW = hintFm.stringWidth("\u2190");
                 g2.setColor(new Color(255,255,255,120));
-                g2.drawString("←", 10, getHeight()/2 + hintFm.getAscent()/2 - 4);
-                g2.drawString("→", getWidth()-10-hintW, getHeight()/2 + hintFm.getAscent()/2 - 4);
-                int upW = hintFm.stringWidth("↑");
-                g2.drawString("↑", getWidth()/2 - upW/2, 30);
-                g2.drawString("↓", getWidth()/2 - upW/2, getHeight()-10);
+                g2.drawString("\u2190", 10, getHeight()/2 + hintFm.getAscent()/2 - 4);
+                g2.drawString("\u2192", getWidth()-10-hintW, getHeight()/2 + hintFm.getAscent()/2 - 4);
+                int upW = hintFm.stringWidth("\u2191");
+                g2.drawString("\u2191", getWidth()/2 - upW/2, 30);
+                g2.drawString("\u2193", getWidth()/2 - upW/2, getHeight()-10);
 
             } finally {
                 g2.dispose();
             }
         }
 
-        private void initClick() {
-            try {
-                AudioFormat af = new AudioFormat(44100f, 16, 1, true, false);
-                DataLine.Info info = new DataLine.Info(SourceDataLine.class, af);
-                if (AudioSystem.isLineSupported(info)) {
-                    clickLine = (SourceDataLine) AudioSystem.getLine(info);
-                    clickLine.open(af);
-                    clickLine.start();
-                }
-            } catch (Exception ex) {
-                ex.printStackTrace();
-                clickLine = null;
-            }
-        }
-
-        private void playClick() {
-            if (clickBuf == null) return;
-            if (clickLine == null) {
-                // try to open on demand
-                initClick();
-                if (clickLine == null) return;
-            }
-            // play asynchronously to avoid blocking UI thread
-            byte[] copy = clickBuf;
-            new Thread(() -> {
-                clickLine.write(copy, 0, copy.length);
-            }, "click-play").start();
-        }
     }
 
     private static class Note {
@@ -546,6 +597,27 @@ public class SimpleWindow extends JFrame {
                     y = -SPAWN_OFFSET; x = panelW / 2.0; break;
                 default:
                     y = panelH + SPAWN_OFFSET; x = panelW / 2.0; break;
+            }
+            trail.add(new Point((int)x, (int)y));
+        }
+
+        // overloaded constructor to allow custom spawn offset to avoid overlaps
+        public Note(Direction dir, int length, double speed, int panelW, int panelH, boolean isHold, int holdRequired, int spawnOffsetOverride) {
+            this.dir = dir;
+            this.length = length;
+            this.speed = speed;
+            this.isHold = isHold;
+            this.holdRequired = isHold ? holdRequired : 0;
+            this.holdProgress = 0;
+            switch (dir) {
+                case LEFT:
+                    x = -spawnOffsetOverride; y = panelH / 2.0; break;
+                case RIGHT:
+                    x = panelW + spawnOffsetOverride; y = panelH / 2.0; break;
+                case UP:
+                    y = -spawnOffsetOverride; x = panelW / 2.0; break;
+                default:
+                    y = panelH + spawnOffsetOverride; x = panelW / 2.0; break;
             }
             trail.add(new Point((int)x, (int)y));
         }
